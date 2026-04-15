@@ -17,6 +17,7 @@ import {
   answerProjectQuestion,
   capturePreviewSnapshot,
   clickChatAction,
+  clickQueueResume,
   connectProjectDomain,
   connectProjectGitProvider,
   clickQuestionAction,
@@ -456,7 +457,8 @@ program
         postSubmitTimeoutMs: options.postSubmitTimeoutMs,
         verificationTimeoutMs: options.verificationTimeoutMs,
         headless: Boolean(options.headless),
-        questionTimeoutMs: options.questionTimeoutMs
+        questionTimeoutMs: options.questionTimeoutMs,
+        autoResume: Boolean(options.autoResume)
       });
       printPromptSequenceLogs(promptSequence);
 
@@ -1135,7 +1137,8 @@ program
           postSubmitTimeoutMs: options.postSubmitTimeoutMs,
           verificationTimeoutMs: options.verificationTimeoutMs,
           headless: Boolean(options.headless),
-          questionTimeoutMs: options.questionTimeoutMs
+          questionTimeoutMs: options.questionTimeoutMs,
+          autoResume: Boolean(options.autoResume)
         });
         printPromptSequenceLogs(promptSequence);
 
@@ -1959,7 +1962,8 @@ addProjectSessionOptions(
             postSubmitTimeoutMs: 20_000,
             verificationTimeoutMs: 600_000,
             headless,
-            questionTimeoutMs: 8_000
+            questionTimeoutMs: 8_000,
+            autoResume: Boolean(options.autoResume)
           });
           printPromptSequenceLogs(promptSequence, {
             prefix: `Fidelity ${iterationLabel}`
@@ -2957,6 +2961,67 @@ async function ensureProjectIdleOrThrow(page, {
   return enriched;
 }
 
+async function observePromptFlowState(page, {
+  autoResume = false,
+  timeoutMs = 5_000,
+  pollMs = 500,
+  contextLabel = "prompt flow",
+  throwOnQuestion = false
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let resumeAttempts = 0;
+  let lastState = null;
+
+  while (Date.now() < deadline) {
+    lastState = await getProjectIdleState(page, {
+      timeoutMs: Math.min(pollMs, 750),
+      pollMs: Math.min(pollMs, 250)
+    });
+
+    if (lastState.status === "queue_paused") {
+      if (!autoResume) {
+        throw new Error(
+          `Lovable queue paused during ${contextLabel}. Re-run with --auto-resume or resume it manually.`
+        );
+      }
+
+      const resumed = await clickQueueResume(page, {
+        timeoutMs: Math.max(5_000, pollMs),
+        settleMs: 1_000
+      });
+
+      if (!resumed) {
+        throw new Error(
+          `Lovable queue paused during ${contextLabel}, but the CLI could not click Resume queue / Continue queue.`
+        );
+      }
+
+      resumeAttempts += 1;
+      await page.waitForTimeout(pollMs);
+      continue;
+    }
+
+    if (lastState.status === "error") {
+      throw new Error(
+        `Lovable showed a runtime/build error surface during ${contextLabel}.`
+      );
+    }
+
+    if (lastState.status === "waiting_for_input" && throwOnQuestion) {
+      throw new Error(
+        `Lovable opened a Questions card during ${contextLabel}. Answer it before continuing.`
+      );
+    }
+
+    await page.waitForTimeout(pollMs);
+  }
+
+  return {
+    state: lastState,
+    resumeAttempts
+  };
+}
+
 async function runPromptSequence(page, {
   normalizedUrl,
   prompt,
@@ -2967,7 +3032,8 @@ async function runPromptSequence(page, {
   postSubmitTimeoutMs = 20_000,
   verificationTimeoutMs = 600_000,
   headless = false,
-  questionTimeoutMs = 8_000
+  questionTimeoutMs = 8_000,
+  autoResume = false
 } = {}) {
   if (typeof prompt !== "string" || prompt.trim().length === 0) {
     return [];
@@ -2996,6 +3062,7 @@ async function runPromptSequence(page, {
       headless,
       requireLocalAck: isFinalPart && part.total === 1,
       requirePersistence: isFinalPart,
+      autoResumeQueue: Boolean(autoResume),
       persistenceRetries: isFinalPart && part.total > 1 ? 2 : 0,
       persistenceRetryDelayMs: 5_000,
       persistenceSettleMs: isFinalPart && part.total > 1 ? 10_000 : 6_000
@@ -3007,6 +3074,17 @@ async function runPromptSequence(page, {
       ...turn
     };
     sequence.push(entry);
+
+    const flowState = await observePromptFlowState(page, {
+      autoResume: Boolean(autoResume),
+      timeoutMs: part.total > 1 ? 4_000 : 2_000,
+      pollMs: 500,
+      contextLabel: sequence.length > 1
+        ? `prompt part ${part.index}/${part.total}`
+        : "prompt submission",
+      throwOnQuestion: false
+    });
+    entry.flowState = flowState;
 
     if (part.total > 1 && part.index < part.total) {
       const questionState = await getProjectQuestionState(page, {
@@ -3131,6 +3209,7 @@ async function runPromptTurn(page, {
   headless = false,
   requireLocalAck = true,
   requirePersistence = true,
+  autoResumeQueue = false,
   persistenceRetries = 0,
   persistenceRetryDelayMs = 5_000,
   persistenceSettleMs = 6_000
@@ -3200,6 +3279,14 @@ async function runPromptTurn(page, {
 
   if (requirePersistence) {
     for (let attempt = 0; attempt <= persistenceRetries; attempt += 1) {
+      await observePromptFlowState(page, {
+        autoResume: Boolean(autoResumeQueue),
+        timeoutMs: 3_000,
+        pollMs: 500,
+        contextLabel: "prompt persistence check",
+        throwOnQuestion: true
+      });
+
       persisted = await confirmPromptPersistsAfterReload(page, {
         prompt,
         timeoutMs: postSubmitTimeoutMs,

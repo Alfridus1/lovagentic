@@ -147,6 +147,7 @@ For a single end-to-end proposal run:
 - idle-state detection through `wait-for-idle`
 - prompt guard for obviously truncated prompts
 - automatic prompt splitting for large Lovable messages
+- queue auto-resume during multipart prompt flows when `--auto-resume` is enabled
 - `build` and `plan` composer mode switching
 - reading Lovable clarification cards through `questions`
 - answering free-text Lovable clarification cards through `question-answer`

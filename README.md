@@ -448,6 +448,7 @@ npm run start -- knowledge "https://lovable.dev/projects/your-project" \
 - `prompt --answer-question` and `chat-loop --answer-question` can auto-answer a delayed Lovable `Questions` card, but the follow-up may appear noticeably later than the original chat accept, so tune `--question-timeout-ms` when needed.
 - `prompt` now waits for a real server-side `/chat` accept before it trusts the UI and then confirms persistence with a reload.
 - `prompt`, `chat-loop`, and `fidelity-loop` auto-split large prompts by default. Use `--no-auto-split` only if you explicitly want one large Lovable turn.
+- `--auto-resume` is also wired into multipart prompt flows now, so paused `Resume queue` / `Continue queue` states can be cleared while the CLI is still sending or stabilizing a long prompt.
 - `prompt --verify` runs the same preview capture path immediately after a persisted prompt.
 - `publish` walks the Lovable publish wizard, waits for the deployment request, and then probes the live URL until it returns success.
 - `publish` currently follows the default Lovable publish path: suggested `.lovable.app` subdomain and the default visibility selection shown in the wizard.

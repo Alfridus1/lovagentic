@@ -160,5 +160,6 @@ npm run start -- publish "<project-url>" \
 - `code` and `speed` are pragmatic fallbacks: GitHub + Lighthouse, not DOM scraping of Lovable's in-app panes.
 - `wait-for-idle` uses page state, queue labels, runtime errors, and question cards; generic proposal chips do not count as build activity.
 - long prompts auto-split by default; use `--no-auto-split` only when you explicitly want a single large Lovable turn.
+- `--auto-resume` also applies during multipart prompt flows, not just `wait-for-idle` / `verify` / `speed`.
 - `knowledge` writes are guarded. If Lovable does not persist after reload, treat that as a product/UI limitation and fail loudly instead of pretending success.
 - Confirm persistence after reload or navigation when a Lovable action claims success.
