@@ -65,6 +65,7 @@ Core commands:
 ```bash
 npm run doctor
 npm run start -- login
+npm run start -- list
 npm run start -- create "Build a simple landing page"
 npm run start -- prompt "https://lovable.dev/projects/..." "Add a hero CTA"
 npm run start -- mode "https://lovable.dev/projects/..." plan
@@ -124,6 +125,7 @@ For a single end-to-end proposal run:
 ## What Currently Works
 
 - project creation through build URLs
+- dashboard project/workspace listing through the logged-in `/dashboard` page
 - prompt submission with server-side accept checks
 - `build` and `plan` composer mode switching
 - listing visible chat-side proposal actions near the composer

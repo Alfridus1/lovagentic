@@ -19,6 +19,7 @@ import {
   clickRuntimeErrorAction,
   ensureSignedIn,
   fillPrompt,
+  getDashboardState,
   getCurrentPromptMode,
   getProjectFindingsState,
   getProjectDomainSettingsState,
@@ -148,6 +149,66 @@ program
       } else {
         console.log(`Lovable session detected in ${profileDir}`);
       }
+    } finally {
+      await context.close();
+    }
+  });
+
+program
+  .command("list")
+  .description("List Lovable dashboard projects plus the visible workspace menu entries.")
+  .option("--profile-dir <path>", "Override the CLI browser profile path")
+  .option("--seed-desktop-session", "Refresh the Playwright profile from the desktop app before launch", false)
+  .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
+  .option("--base-url <url>", "Override the Lovable base URL", DEFAULT_BASE_URL)
+  .option("--headless", "Run headlessly instead of opening a visible browser", false)
+  .option("--timeout-ms <ms>", "How long to wait for the dashboard feed to load", parseInteger, 20_000)
+  .option("--poll-ms <ms>", "Polling interval while waiting for the dashboard feed", parseInteger, 250)
+  .option("--page-size <n>", "Pagination size for dashboard project requests", parseInteger, 100)
+  .option("--limit <n>", "Limit human-readable rows; JSON output still includes all projects", parseInteger)
+  .option("--json", "Print the extracted dashboard state as JSON", false)
+  .action(async (options) => {
+    const profileDir = getProfileDir(options.profileDir);
+    if (options.seedDesktopSession) {
+      await seedDesktopProfileIntoPlaywrightDefault({
+        fromDir: getDesktopProfileDir(options.desktopProfileDir),
+        toDir: profileDir,
+        force: true
+      });
+    }
+
+    const context = await launchLovableContext({
+      profileDir,
+      headless: Boolean(options.headless)
+    });
+
+    try {
+      const page = context.pages()[0] || await context.newPage();
+      await page.goto(options.baseUrl, { waitUntil: "domcontentloaded" });
+
+      const hasSession = await hasLovableSession(page);
+      if (!hasSession) {
+        throw new Error(
+          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+        );
+      }
+
+      const dashboardUrl = new URL("/dashboard", options.baseUrl).toString();
+      const state = await getDashboardState(page, {
+        dashboardUrl,
+        timeoutMs: options.timeoutMs,
+        pollMs: options.pollMs,
+        pageSize: options.pageSize
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(state, null, 2));
+        return;
+      }
+
+      printDashboardState(state, {
+        limit: options.limit
+      });
     } finally {
       await context.close();
     }
@@ -1283,6 +1344,58 @@ function printPublishedSettingsState(state) {
   console.log(`Website title placeholder: ${state.websiteInfo?.titlePlaceholder || "(none)"}`);
   console.log(`Website description: ${state.websiteInfo?.description || "(empty)"}`);
   console.log(`Website description placeholder: ${state.websiteInfo?.descriptionPlaceholder || "(none)"}`);
+}
+
+function printDashboardState(state, {
+  limit
+} = {}) {
+  const workspaceLabel = state.currentWorkspace?.name || "(unknown)";
+  const workspaceIdSuffix = state.currentWorkspace?.id ? ` (${state.currentWorkspace.id})` : "";
+  const workspaceMetaSuffix = state.currentWorkspace?.meta ? ` | ${state.currentWorkspace.meta}` : "";
+  const availableWorkspaces = (state.workspaces || [])
+    .map((workspace) => `${workspace.name}${workspace.current ? " (current)" : ""}`)
+    .join(", ") || "(none)";
+
+  console.log(`Dashboard: ${state.dashboardUrl}`);
+  console.log(`Current workspace: ${workspaceLabel}${workspaceIdSuffix}${workspaceMetaSuffix}`);
+  console.log(`Available workspaces: ${availableWorkspaces}`);
+  console.log(
+    `Projects: ${state.projects.length} unique | workspace=${state.collections?.workspace?.count ?? 0} | recent=${state.collections?.recent?.count ?? 0} | shared=${state.collections?.shared?.count ?? 0} | starred=${state.collections?.starred?.count ?? 0}`
+  );
+
+  const projects = typeof limit === "number"
+    ? state.projects.slice(0, limit)
+    : state.projects;
+
+  projects.forEach((project, index) => {
+    const label = project.slug && project.slug !== project.title
+      ? `${project.title} [${project.slug}]`
+      : project.title;
+    const workspace = project.workspaceName || (project.workspaceId ? `id:${project.workspaceId}` : "unknown");
+    const collections = project.collections?.join(",") || "(none)";
+    const details = [
+      `[${index}] ${label}`,
+      `workspace=${workspace}`,
+      `collections=${collections}`,
+      `project=${project.projectUrl}`
+    ];
+
+    if (project.liveUrl) {
+      details.push(`live=${project.liveUrl}`);
+    }
+
+    if (project.lastEditedAt) {
+      details.push(`lastEdited=${project.lastEditedAt}`);
+    } else if (project.lastViewedAt) {
+      details.push(`lastViewed=${project.lastViewedAt}`);
+    }
+
+    console.log(details.join(" | "));
+  });
+
+  if (typeof limit === "number" && state.projects.length > limit) {
+    console.log(`Showing first ${limit} of ${state.projects.length} projects.`);
+  }
 }
 
 function printDomainSettingsState(state) {

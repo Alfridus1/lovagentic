@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { chromium } from "playwright";
 
+import { DEFAULT_BASE_URL } from "./config.js";
+
 const INPUT_SELECTORS = [
   "textarea",
   "[contenteditable='true']",
@@ -35,6 +37,9 @@ const FINDINGS_STATUS_EXACT_PATTERN = /^(Out of date|Up to date|Scanning|Scan in
 const RUNTIME_ERROR_TITLE_PATTERN = /^Error$/i;
 const RUNTIME_ERROR_MESSAGE_PATTERN = /The app encountered an error/i;
 const RUNTIME_ERROR_ACTION_PATTERN = /Try to fix|Show logs/i;
+const DASHBOARD_PATH = "/dashboard";
+const DASHBOARD_READY_PATTERN = /All projects|Shared with me|Recents/i;
+const DASHBOARD_WORKSPACE_MENU_PATTERN = /workspace menu/i;
 
 export async function launchLovableContext({
   profileDir,
@@ -1098,6 +1103,493 @@ export async function ensureSignedIn(page, {
   }
 
   return false;
+}
+
+function getDashboardCollectionKey(urlValue) {
+  try {
+    const url = new URL(urlValue);
+
+    if (url.pathname === "/v2/user/projects/starred") {
+      return "starred";
+    }
+
+    if (url.pathname === "/v2/user/projects/shared") {
+      return "shared";
+    }
+
+    const workspaceProjectsMatch = url.pathname.match(/^\/workspaces\/([^/]+)\/projects\/search$/);
+    if (!workspaceProjectsMatch) {
+      return null;
+    }
+
+    if (
+      url.searchParams.get("sort_by") === "last_viewed_at" &&
+      url.searchParams.get("viewed_by_me") === "true"
+    ) {
+      return "recent";
+    }
+
+    if (url.searchParams.get("sort_by") === "last_edited_at") {
+      return "workspace";
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function getWorkspaceIdFromDashboardUrl(urlValue) {
+  return String(urlValue || "").match(/\/workspaces\/([^/]+)\/projects\/search/)?.[1] || null;
+}
+
+function isProjectListBody(value) {
+  return Boolean(value && typeof value === "object" && Array.isArray(value.projects));
+}
+
+function getPaginationRequestHeaders(headers) {
+  const allowedKeys = new Set([
+    "authorization",
+    "content-type",
+    "referer",
+    "user-agent",
+    "x-client-git-sha"
+  ]);
+  return Object.fromEntries(
+    Object.entries(headers || {}).filter(([key, value]) => {
+      return allowedKeys.has(String(key || "").toLowerCase()) && value;
+    })
+  );
+}
+
+async function fetchJsonWithPageSession(requestUrl, {
+  headers = {}
+} = {}) {
+  const response = await fetch(requestUrl, {
+    headers: getPaginationRequestHeaders(headers)
+  });
+  const contentType = response.headers.get("content-type") || "";
+  let body = null;
+
+  try {
+    if (contentType.includes("application/json")) {
+      body = await response.json();
+    } else {
+      body = await response.text();
+    }
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(`Lovable dashboard request failed (${response.status}): ${requestUrl}`);
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    url: response.url,
+    body
+  };
+}
+
+async function fetchAllDashboardProjects(initialCapture, {
+  pageSize = 100,
+  maxPages = 50
+} = {}) {
+  if (!initialCapture?.url) {
+    return {
+      requestUrl: null,
+      total: 0,
+      projects: []
+    };
+  }
+
+  const requestUrl = new URL(initialCapture.url);
+  requestUrl.searchParams.set("limit", String(pageSize));
+
+  const projects = [];
+  const seenProjectIds = new Set();
+  let total = 0;
+
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    requestUrl.searchParams.set("offset", String(pageIndex * pageSize));
+    const response = await fetchJsonWithPageSession(requestUrl.toString(), {
+      headers: initialCapture.requestHeaders
+    });
+    const body = response.body;
+
+    if (!isProjectListBody(body)) {
+      break;
+    }
+
+    total = typeof body.total === "number" ? body.total : total;
+
+    for (const project of body.projects) {
+      if (!project?.id || seenProjectIds.has(project.id)) {
+        continue;
+      }
+
+      seenProjectIds.add(project.id);
+      projects.push(project);
+    }
+
+    if (!body.has_more || body.projects.length === 0) {
+      break;
+    }
+
+    if (total > 0 && projects.length >= total) {
+      break;
+    }
+  }
+
+  return {
+    requestUrl: requestUrl.toString(),
+    total: total || projects.length,
+    projects
+  };
+}
+
+async function openDashboardWorkspaceMenu(page, {
+  timeoutMs = 10_000
+} = {}) {
+  const trigger = page.getByRole("button", {
+    name: DASHBOARD_WORKSPACE_MENU_PATTERN
+  }).first();
+
+  await trigger.waitFor({
+    state: "visible",
+    timeout: timeoutMs
+  });
+  const triggerAriaLabel = await trigger.evaluate((element) => {
+    return element.getAttribute("aria-label") || "";
+  });
+
+  const menu = page.locator('[role="menu"]').filter({
+    hasText: /All workspaces|Create new workspace|Find workspaces/i
+  }).last();
+
+  const visible = await menu.isVisible().catch(() => false);
+  if (!visible) {
+    await trigger.click();
+    await menu.waitFor({
+      state: "visible",
+      timeout: timeoutMs
+    });
+    return {
+      trigger,
+      triggerAriaLabel,
+      menu,
+      opened: true
+    };
+  }
+
+  return {
+    trigger,
+    triggerAriaLabel,
+    menu,
+    opened: false
+  };
+}
+
+async function readDashboardWorkspaceState(page, {
+  timeoutMs = 10_000
+} = {}) {
+  const { triggerAriaLabel, menu, opened } = await openDashboardWorkspaceMenu(page, {
+    timeoutMs
+  });
+
+  const buttonWorkspaceName = normalizeText(
+    String(triggerAriaLabel || "").replace(/\s+workspace menu$/i, "")
+  );
+
+  const snapshot = await menu.evaluate((root) => {
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const paragraphs = Array.from(root.querySelectorAll("p"))
+      .map((element) => normalize(element.textContent || ""))
+      .filter(Boolean);
+    const currentWorkspaceName = paragraphs[0] || "";
+    const currentWorkspaceMeta = paragraphs[1] || "";
+
+    const workspaceItems = Array.from(root.querySelectorAll('[role="menuitem"]'))
+      .map((element) => {
+        const name = normalize(element.querySelector("p")?.textContent || "");
+        const spans = Array.from(element.querySelectorAll("span"))
+          .map((span) => normalize(span.textContent || ""))
+          .filter(Boolean);
+        const plan = spans.find((value) => !/^[A-Z]$/i.test(value)) || null;
+        const isCurrent = Boolean(element.querySelector("svg.ml-auto"));
+
+        return {
+          name,
+          plan,
+          current: isCurrent
+        };
+      })
+      .filter((item) => item.name);
+
+    const menuActions = Array.from(root.querySelectorAll("button"))
+      .map((button) => normalize(button.textContent || ""))
+      .filter((label) => /Create new workspace|Find workspaces|Settings|Invite members/i.test(label));
+
+    return {
+      currentWorkspaceName,
+      currentWorkspaceMeta,
+      workspaceItems,
+      menuActions
+    };
+  });
+
+  if (opened) {
+    await page.keyboard.press("Escape").catch(() => {});
+  }
+
+  const workspaceItems = Array.from(
+    new Map(
+      snapshot.workspaceItems.map((item) => [
+        item.name.toLowerCase(),
+        item
+      ])
+    ).values()
+  );
+
+  const currentWorkspace = {
+    name: snapshot.currentWorkspaceName || buttonWorkspaceName || null,
+    meta: snapshot.currentWorkspaceMeta || null
+  };
+
+  return {
+    currentWorkspace,
+    workspaces: workspaceItems.map((item) => ({
+      ...item,
+      current: item.current || item.name === currentWorkspace.name
+    })),
+    menuActions: snapshot.menuActions
+  };
+}
+
+async function captureDashboardBootstrap(page, {
+  dashboardUrl,
+  timeoutMs = 20_000,
+  pollMs = 250
+} = {}) {
+  const captures = new Map();
+
+  const onResponse = async (response) => {
+    if (response.request().method() !== "GET") {
+      return;
+    }
+
+    const key = getDashboardCollectionKey(response.url());
+    if (!key) {
+      return;
+    }
+
+    const body = await readResponseBody(response);
+    if (!isProjectListBody(body)) {
+      return;
+    }
+
+    captures.set(key, {
+      key,
+      url: response.url(),
+      status: response.status(),
+      requestHeaders: response.request().headers(),
+      body
+    });
+  };
+
+  page.on("response", onResponse);
+
+  try {
+    await page.goto(dashboardUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 120_000
+    });
+
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const dashboardReady = await page.getByText(DASHBOARD_READY_PATTERN, {
+        exact: false
+      }).first().isVisible().catch(() => false);
+
+      if (captures.has("workspace") && dashboardReady) {
+        return {
+          dashboardUrl: page.url(),
+          captures
+        };
+      }
+
+      await page.waitForTimeout(pollMs);
+    }
+
+    throw new Error("Lovable dashboard loaded, but the workspace project feed never appeared.");
+  } finally {
+    page.off("response", onResponse);
+  }
+}
+
+function buildProjectUrl(projectId, baseUrl = DEFAULT_BASE_URL) {
+  const url = new URL(baseUrl);
+  url.pathname = `/projects/${projectId}`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+function mergeDashboardProjects({
+  collections,
+  baseUrl = DEFAULT_BASE_URL,
+  currentWorkspaceId,
+  currentWorkspaceName
+}) {
+  const merged = new Map();
+  const collectionOrder = {
+    workspace: 0,
+    recent: 1,
+    starred: 2,
+    shared: 3
+  };
+
+  const mergeProject = (collectionKey, project) => {
+    if (!project?.id) {
+      return;
+    }
+
+    const title = project.display_name || project.name || project.id;
+    const existing = merged.get(project.id) || {
+      id: project.id,
+      title,
+      displayName: project.display_name || null,
+      slug: project.name || null,
+      projectUrl: buildProjectUrl(project.id, baseUrl),
+      liveUrl: project.url || null,
+      workspaceId: project.workspace_id || null,
+      workspaceName: project.workspace_id === currentWorkspaceId ? currentWorkspaceName : null,
+      visibility: project.visibility || null,
+      publishVisibility: project.publish_visibility || null,
+      status: project.status || null,
+      published: Boolean(project.is_published),
+      starred: Boolean(project.is_starred),
+      accessLevel: project.access_level || null,
+      ownerDisplayName: project.user_display_name || null,
+      createdAt: project.created_at || null,
+      updatedAt: project.updated_at || null,
+      lastEditedAt: project.last_edited_at || null,
+      lastViewedAt: project.last_viewed_at || null,
+      editCount: typeof project.edit_count === "number" ? project.edit_count : null,
+      remixCount: typeof project.remix_count === "number" ? project.remix_count : null,
+      techStack: project.tech_stack || null,
+      category: project.category || null,
+      collections: []
+    };
+
+    existing.title = existing.title || title;
+    existing.displayName = existing.displayName || project.display_name || null;
+    existing.slug = existing.slug || project.name || null;
+    existing.liveUrl = existing.liveUrl || project.url || null;
+    existing.workspaceId = existing.workspaceId || project.workspace_id || null;
+    existing.workspaceName = existing.workspaceName ||
+      (project.workspace_id === currentWorkspaceId ? currentWorkspaceName : null);
+    existing.visibility = existing.visibility || project.visibility || null;
+    existing.publishVisibility = existing.publishVisibility || project.publish_visibility || null;
+    existing.status = existing.status || project.status || null;
+    existing.published = existing.published || Boolean(project.is_published);
+    existing.starred = existing.starred || Boolean(project.is_starred);
+    existing.accessLevel = existing.accessLevel || project.access_level || null;
+    existing.ownerDisplayName = existing.ownerDisplayName || project.user_display_name || null;
+    existing.createdAt = existing.createdAt || project.created_at || null;
+    existing.updatedAt = existing.updatedAt || project.updated_at || null;
+    existing.lastEditedAt = existing.lastEditedAt || project.last_edited_at || null;
+    existing.lastViewedAt = existing.lastViewedAt || project.last_viewed_at || null;
+    existing.editCount = existing.editCount ?? project.edit_count ?? null;
+    existing.remixCount = existing.remixCount ?? project.remix_count ?? null;
+    existing.techStack = existing.techStack || project.tech_stack || null;
+    existing.category = existing.category || project.category || null;
+
+    if (!existing.collections.includes(collectionKey)) {
+      existing.collections.push(collectionKey);
+      existing.collections.sort((left, right) => collectionOrder[left] - collectionOrder[right]);
+    }
+
+    merged.set(project.id, existing);
+  };
+
+  Object.entries(collections).forEach(([collectionKey, collection]) => {
+    for (const project of collection.projects || []) {
+      mergeProject(collectionKey, project);
+    }
+  });
+
+  return Array.from(merged.values())
+    .sort((left, right) => {
+      const leftDate = Date.parse(left.lastEditedAt || left.lastViewedAt || left.updatedAt || left.createdAt || 0);
+      const rightDate = Date.parse(right.lastEditedAt || right.lastViewedAt || right.updatedAt || right.createdAt || 0);
+      return rightDate - leftDate;
+    });
+}
+
+export async function getDashboardState(page, {
+  dashboardUrl = new URL(DASHBOARD_PATH, DEFAULT_BASE_URL).toString(),
+  timeoutMs = 20_000,
+  pollMs = 250,
+  pageSize = 100
+} = {}) {
+  const bootstrap = await captureDashboardBootstrap(page, {
+    dashboardUrl,
+    timeoutMs,
+    pollMs
+  });
+
+  const workspaceState = await readDashboardWorkspaceState(page, {
+    timeoutMs
+  });
+
+  const currentWorkspaceId = getWorkspaceIdFromDashboardUrl(
+    bootstrap.captures.get("workspace")?.url
+  );
+
+  const collections = {
+    workspace: await fetchAllDashboardProjects(bootstrap.captures.get("workspace"), {
+      pageSize
+    }),
+    recent: await fetchAllDashboardProjects(bootstrap.captures.get("recent"), {
+      pageSize
+    }),
+    shared: await fetchAllDashboardProjects(bootstrap.captures.get("shared"), {
+      pageSize
+    }),
+    starred: await fetchAllDashboardProjects(bootstrap.captures.get("starred"), {
+      pageSize
+    })
+  };
+
+  return {
+    dashboardUrl: bootstrap.dashboardUrl,
+    currentWorkspace: {
+      id: currentWorkspaceId,
+      name: workspaceState.currentWorkspace.name,
+      meta: workspaceState.currentWorkspace.meta
+    },
+    workspaces: workspaceState.workspaces,
+    workspaceMenuActions: workspaceState.menuActions,
+    collections: Object.fromEntries(
+      Object.entries(collections).map(([key, value]) => [
+        key,
+        {
+          total: value.total,
+          count: value.projects.length,
+          requestUrl: value.requestUrl
+        }
+      ])
+    ),
+    projects: mergeDashboardProjects({
+      collections,
+      baseUrl: new URL(dashboardUrl).origin,
+      currentWorkspaceId,
+      currentWorkspaceName: workspaceState.currentWorkspace.name
+    })
+  };
 }
 
 function normalizePromptMode(mode) {

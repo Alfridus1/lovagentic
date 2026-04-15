@@ -1,6 +1,6 @@
 ---
 name: lovable-cli
-description: "Use this repo-local skill when work should drive Lovable through the `lovable-cli` project in this repository: create apps, send prompts, switch build/plan, click proposal actions, inspect runtime errors with `Try to fix`, extract security findings, verify previews, and publish Lovable projects. Prefer this skill over ad hoc browser scripting when the task targets `lovable.dev` and can be done through the CLI. Do not use it for private desktop reverse engineering or unsupported domain-purchase flows."
+description: "Use this repo-local skill when work should drive Lovable through the `lovable-cli` project in this repository: list dashboard projects/workspaces, create apps, send prompts, switch build/plan, click proposal actions, inspect runtime errors with `Try to fix`, extract security findings, verify previews, and publish Lovable projects. Prefer this skill over ad hoc browser scripting when the task targets `lovable.dev` and can be done through the CLI. Do not use it for private desktop reverse engineering or unsupported domain-purchase flows."
 metadata:
   {
     "openclaw":
@@ -20,6 +20,7 @@ Use the local CLI in this repo instead of rebuilding Lovable browser flows from 
 Use this skill for:
 
 - Lovable project creation through build URLs
+- dashboard project/workspace listing through `list`
 - `build` / `plan` mode switching
 - prompt submission and prompt-to-action loops
 - visible proposal actions near the composer
@@ -59,6 +60,11 @@ Open [README.md](../../README.md) only when you need full command flags or examp
 npm run start -- prompt "<project-url>" "<prompt>" \
   --profile-dir /tmp/lovable-cli-task \
   --seed-desktop-session
+
+npm run start -- list \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session \
+  --headless
 
 npm run start -- chat-loop "<project-url>" "<prompt>" \
   --mode plan \

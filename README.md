@@ -83,6 +83,25 @@ Login once into the CLI-managed browser profile:
 npm run start -- login
 ```
 
+List Lovable dashboard projects and the visible workspace menu entries:
+
+```bash
+npm run start -- list \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --headless
+```
+
+Get the same dashboard state as JSON:
+
+```bash
+npm run start -- list \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --headless \
+  --json
+```
+
 Send a follow-up prompt into a Lovable project page:
 
 ```bash
@@ -281,6 +300,7 @@ npm run start -- domain "https://lovable.dev/projects/your-project" \
 
 - `create` opens the system browser because the desktop app does not expose a documented URL-open control surface.
 - `create` can also automate the whole flow with `--profile-dir` plus `--seed-desktop-session`.
+- `list` reads Lovable's real `/dashboard` page, not the older `/projects` route, and extracts the current workspace, visible workspace menu entries, and the dashboard project feeds.
 - `mode` switches the main Lovable composer between `build` and `plan`.
 - `prompt` uses Playwright and a persistent profile at `~/.lovable-cli/profile` by default.
 - `prompt --mode plan|build` switches the composer before it types and submits.
