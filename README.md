@@ -33,7 +33,6 @@ This prototype stays on the stable side.
 ## Install
 
 ```bash
-cd /Users/tobik/Documents/Playground/lovable-cli
 npm install
 npx playwright install chromium
 ```
