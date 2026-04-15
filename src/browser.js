@@ -194,23 +194,57 @@ async function getPromptHandle(page, selectorOverride, timeoutMs = 15_000) {
   );
 }
 
+async function readEditableText(target) {
+  return target.evaluate((element) => {
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+      return String(element.value || "");
+    }
+
+    return String(element.innerText ?? element.textContent ?? "");
+  });
+}
+
+async function fillEditableTarget(page, target, text) {
+  const tagName = await target.evaluate((element) => element.tagName.toLowerCase());
+
+  await target.click();
+
+  if (tagName === "textarea" || tagName === "input") {
+    await target.fill(text);
+    return { method: "fill", tagName };
+  }
+
+  await target.evaluate((element) => {
+    element.focus();
+
+    const selection = element.ownerDocument.defaultView?.getSelection();
+    if (!selection) {
+      return;
+    }
+
+    const range = element.ownerDocument.createRange();
+    range.selectNodeContents(element);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+
+  await page.keyboard.insertText(text);
+
+  const insertedText = await readEditableText(target);
+  if (normalizeText(insertedText) !== normalizeText(text)) {
+    throw new Error(
+      "Failed to verify the Lovable composer contents after insertText. The prompt was not inserted exactly as expected."
+    );
+  }
+
+  return { method: "insertText", tagName };
+}
+
 export async function fillPrompt(page, prompt, {
   selector
 } = {}) {
   const handle = await getPromptHandle(page, selector);
-  const tagName = await handle.evaluate((element) => element.tagName.toLowerCase());
-
-  await handle.click();
-
-  if (tagName === "textarea" || tagName === "input") {
-    await handle.fill(prompt);
-    return { method: "fill", tagName };
-  }
-
-  const modifier = process.platform === "darwin" ? "Meta" : "Control";
-  await page.keyboard.press(`${modifier}+A`);
-  await page.keyboard.type(prompt, { delay: 8 });
-  return { method: "keyboard", tagName };
+  return fillEditableTarget(page, handle, prompt);
 }
 
 export async function submitPrompt(page, {
@@ -808,25 +842,7 @@ async function fillQuestionInput(page, answer, {
     timeout: timeoutMs
   });
 
-  const tagName = await editable.evaluate((element) => element.tagName.toLowerCase());
-  await editable.click();
-
-  if (tagName === "textarea" || tagName === "input") {
-    await editable.fill(answer);
-    return {
-      tagName,
-      method: "fill"
-    };
-  }
-
-  const modifier = process.platform === "darwin" ? "Meta" : "Control";
-  await page.keyboard.press(`${modifier}+A`);
-  await page.keyboard.type(answer, { delay: 8 });
-
-  return {
-    tagName,
-    method: "keyboard"
-  };
+  return fillEditableTarget(page, editable, answer);
 }
 
 async function submitQuestionPane(page, {
@@ -2061,6 +2077,17 @@ function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function normalizePromptComparisonText(value) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim().replace(/^([>*#]+|\d+[.)]|[-*•])\s+/, ""))
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function safeJsonParse(value) {
   if (!value) {
     return null;
@@ -2895,18 +2922,41 @@ export async function capturePreviewSnapshot({
 
 async function getPromptState(page, prompt) {
   return page.evaluate((expectedPrompt) => {
-    const normalize = (value) => (value || "").replace(/\s+/g, " ").trim();
-    const bodyText = normalize(document.body?.innerText || "");
+    const normalizePromptComparisonText = (value) => {
+      return String(value || "")
+        .replace(/\r\n/g, "\n")
+        .split("\n")
+        .map((line) => line.trim().replace(/^([>*#]+|\d+[.)]|[-*•])\s+/, ""))
+        .filter(Boolean)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+    };
+    const readElementText = (element) => {
+      if (!element) {
+        return "";
+      }
+
+      if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+        return String(element.value || "");
+      }
+
+      return String(element.innerText ?? element.textContent ?? "");
+    };
+
+    const normalizedExpectedPrompt = normalizePromptComparisonText(expectedPrompt);
+    const bodyText = normalizePromptComparisonText(document.body?.innerText || "");
     const input = document.querySelector('[aria-label="Chat input"]');
-    const inputText = normalize(input?.textContent || "");
-    const bodyWithoutInput = normalize(
-      document.body?.innerText?.replace(input?.textContent || "", "") || ""
+    const inputRawText = readElementText(input);
+    const inputText = normalizePromptComparisonText(inputRawText);
+    const bodyWithoutInput = normalizePromptComparisonText(
+      document.body?.innerText?.replace(inputRawText || "", "") || ""
     );
 
     return {
-      hasPromptText: bodyText.includes(expectedPrompt),
-      hasPromptOutsideInput: bodyWithoutInput.includes(expectedPrompt),
-      promptStillInInput: inputText.includes(expectedPrompt),
+      hasPromptText: bodyText.includes(normalizedExpectedPrompt),
+      hasPromptOutsideInput: bodyWithoutInput.includes(normalizedExpectedPrompt),
+      promptStillInInput: inputText.includes(normalizedExpectedPrompt),
       needsVerification: bodyText.includes("Verification required"),
       isThinking: bodyText.includes("Thinking"),
       inputText,
