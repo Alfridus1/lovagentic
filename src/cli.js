@@ -30,6 +30,7 @@ import {
   getProjectFindingsState,
   getProjectDomainSettingsState,
   getProjectKnowledgeState,
+  getProjectIdleState,
   getProjectQuestionState,
   getProjectRuntimeErrorState,
   getProjectSettingsState,
@@ -52,10 +53,18 @@ import {
   updateProjectSubdomain,
   updatePublishedSettings,
   waitForChatAcceptance,
+  waitForProjectIdle,
   waitForPromptResult,
   waitForVerificationResolution,
   waitForLovableSession
 } from "./browser.js";
+import {
+  buildFidelityFollowUpPrompt,
+  buildPromptSequence,
+  DEFAULT_IDLE_POLL_MS,
+  DEFAULT_IDLE_TIMEOUT_MS,
+  parseAssertionLines
+} from "./orchestration.js";
 import { pathExists, seedDesktopProfileIntoPlaywrightDefault } from "./profile.js";
 import { buildCreateUrl, normalizeTargetUrl } from "./url.js";
 
@@ -385,10 +394,15 @@ program
   .option("--fail-on-console", "Treat preview console warnings/errors as blocking during verify", false)
   .option("--expect-text <text>", "Assert that preview body text contains this string", collectValues, [])
   .option("--forbid-text <text>", "Assert that preview body text does not contain this string", collectValues, [])
+  .option("--no-auto-split", "Send the prompt as a single Lovable message even if it looks too large")
   .option("--allow-fragment", "Send a prompt even if it looks truncated or unfinished", false)
   .option("--answer-question <text>", "If Lovable opens a Questions card after the prompt, answer it with this text")
   .option("--question-option <label>", "Question option label to target before filling free text", "Other")
   .option("--question-timeout-ms <ms>", "How long to wait for a delayed Questions card after the prompt", parseInteger, 8_000)
+  .option("--no-wait-for-idle", "Skip waiting for Lovable to become idle before post-prompt verification")
+  .option("--auto-resume", "Automatically click Resume queue / Continue queue while waiting for idle", false)
+  .option("--idle-timeout-ms <ms>", "How long to wait for Lovable to become idle before verify", parseInteger, DEFAULT_IDLE_TIMEOUT_MS)
+  .option("--idle-poll-ms <ms>", "Polling interval while waiting for Lovable to become idle", parseInteger, DEFAULT_IDLE_POLL_MS)
   .option("--selector <selector>", "Override the prompt input selector")
   .option("--submit-selector <selector>", "Override the submit button selector")
   .option("--wait-after-submit-ms <ms>", "Delay before the browser closes", parseInteger, 4000)
@@ -432,34 +446,19 @@ program
         console.log(`Lovable mode ready: ${modeResult.currentMode}`);
       }
 
-      const promptWarnings = assertPromptLooksComplete(prompt, {
-        allowFragment: Boolean(options.allowFragment)
-      });
-      if (promptWarnings.length > 0) {
-        console.log(`Prompt guard bypassed: ${promptWarnings.join(" ")}`);
-      }
-
-      const promptTurn = await runPromptTurn(page, {
+      const promptSequence = await runPromptSequence(page, {
         normalizedUrl,
         prompt,
+        autoSplit: Boolean(options.autoSplit),
+        allowFragment: Boolean(options.allowFragment),
         selector: options.selector,
         submitSelector: options.submitSelector,
         postSubmitTimeoutMs: options.postSubmitTimeoutMs,
         verificationTimeoutMs: options.verificationTimeoutMs,
-        headless: Boolean(options.headless)
+        headless: Boolean(options.headless),
+        questionTimeoutMs: options.questionTimeoutMs
       });
-
-      console.log(`Prompt filled via ${promptTurn.fillResult.method} (${promptTurn.fillResult.tagName}).`);
-      if (promptTurn.submitResult.selector) {
-        console.log(`Prompt submitted via ${promptTurn.submitResult.method} (${promptTurn.submitResult.selector}).`);
-      } else {
-        console.log(`Prompt submitted via ${promptTurn.submitResult.method} (${promptTurn.submitResult.shortcut}).`);
-      }
-      console.log("Lovable accepted the chat request on the server.");
-      console.log("Lovable acknowledged the prompt and it persisted after reload.");
-      if (promptTurn.verificationResolved?.reason) {
-        console.log(`Verification path: ${promptTurn.verificationResolved.reason}.`);
-      }
+      printPromptSequenceLogs(promptSequence);
 
       const questionState = await getProjectQuestionState(page, {
         timeoutMs: options.questionTimeoutMs,
@@ -486,6 +485,14 @@ program
       }
 
       if (options.verify) {
+        await ensureProjectIdleOrThrow(page, {
+          normalizedUrl,
+          waitForIdle: Boolean(options.waitForIdle),
+          autoResume: Boolean(options.autoResume),
+          timeoutMs: options.idleTimeoutMs,
+          pollMs: options.idlePollMs,
+          contextLabel: "post-prompt verification"
+        });
         const verification = await runPreviewVerification({
           page,
           normalizedUrl,
@@ -1067,10 +1074,15 @@ program
   .option("--fail-on-console", "Treat preview console warnings/errors as blocking during verify", false)
   .option("--expect-text <text>", "Assert that preview body text contains this string", collectValues, [])
   .option("--forbid-text <text>", "Assert that preview body text does not contain this string", collectValues, [])
+  .option("--no-auto-split", "Send the prompt as a single Lovable message even if it looks too large")
   .option("--allow-fragment", "Send a prompt even if it looks truncated or unfinished", false)
   .option("--answer-question <text>", "If Lovable opens a Questions card after the prompt, answer it with this text")
   .option("--question-option <label>", "Question option label to target before filling free text", "Other")
   .option("--question-timeout-ms <ms>", "How long to wait for a delayed Questions card after the prompt", parseInteger, 8_000)
+  .option("--no-wait-for-idle", "Skip waiting for Lovable to become idle before post-loop verification")
+  .option("--auto-resume", "Automatically click Resume queue / Continue queue while waiting for idle", false)
+  .option("--idle-timeout-ms <ms>", "How long to wait for Lovable to become idle before verify", parseInteger, DEFAULT_IDLE_TIMEOUT_MS)
+  .option("--idle-poll-ms <ms>", "Polling interval while waiting for Lovable to become idle", parseInteger, DEFAULT_IDLE_POLL_MS)
   .option("--wait-after-loop-ms <ms>", "Delay before the browser closes after the loop", parseInteger, 4_000)
   .action(async (targetUrl, prompt, options) => {
     const profileDir = getProfileDir(options.profileDir);
@@ -1108,39 +1120,24 @@ program
 
       let currentActions = [];
       if (prompt) {
-        const promptWarnings = assertPromptLooksComplete(prompt, {
-          allowFragment: Boolean(options.allowFragment)
-        });
-        if (promptWarnings.length > 0) {
-          console.log(`Prompt guard bypassed: ${promptWarnings.join(" ")}`);
-        }
-
         const baselineActions = await listChatActions(page, {
           timeoutMs: Math.min(options.waitForActionsMs, 1_000),
           pollMs: options.actionPollMs
         }).catch(() => []);
 
-        const promptTurn = await runPromptTurn(page, {
+        const promptSequence = await runPromptSequence(page, {
           normalizedUrl,
           prompt,
+          autoSplit: Boolean(options.autoSplit),
+          allowFragment: Boolean(options.allowFragment),
           selector: options.selector,
           submitSelector: options.submitSelector,
           postSubmitTimeoutMs: options.postSubmitTimeoutMs,
           verificationTimeoutMs: options.verificationTimeoutMs,
-          headless: Boolean(options.headless)
+          headless: Boolean(options.headless),
+          questionTimeoutMs: options.questionTimeoutMs
         });
-
-        console.log(`Prompt filled via ${promptTurn.fillResult.method} (${promptTurn.fillResult.tagName}).`);
-        if (promptTurn.submitResult.selector) {
-          console.log(`Prompt submitted via ${promptTurn.submitResult.method} (${promptTurn.submitResult.selector}).`);
-        } else {
-          console.log(`Prompt submitted via ${promptTurn.submitResult.method} (${promptTurn.submitResult.shortcut}).`);
-        }
-        console.log("Lovable accepted the chat request on the server.");
-        console.log("Lovable acknowledged the prompt and it persisted after reload.");
-        if (promptTurn.verificationResolved?.reason) {
-          console.log(`Verification path: ${promptTurn.verificationResolved.reason}.`);
-        }
+        printPromptSequenceLogs(promptSequence);
 
         const questionState = await getProjectQuestionState(page, {
           timeoutMs: options.questionTimeoutMs,
@@ -1206,6 +1203,14 @@ program
       }
 
       if (options.verify) {
+        await ensureProjectIdleOrThrow(page, {
+          normalizedUrl,
+          waitForIdle: Boolean(options.waitForIdle),
+          autoResume: Boolean(options.autoResume),
+          timeoutMs: options.idleTimeoutMs,
+          pollMs: options.idlePollMs,
+          contextLabel: "post-loop verification"
+        });
         const verification = await runPreviewVerification({
           page,
           normalizedUrl,
@@ -1784,15 +1789,65 @@ addProjectSessionOptions(
 
 addProjectSessionOptions(
   program
-    .command("speed")
-    .description("Run Lighthouse against the current project preview as a pragmatic Speed-surface fallback.")
+    .command("wait-for-idle")
+    .description("Wait until Lovable is idle: no Thinking state, no paused queue, no open questions, and no visible runtime error.")
     .argument("<target-url>", "Lovable project URL")
 )
-  .option("--device <name>", "Audit desktop, mobile, or both", "both")
-  .option("--output-dir <path>", "Directory for Lighthouse JSON reports")
+  .option("--timeout-ms <ms>", "How long to wait for Lovable to become idle", parseInteger, DEFAULT_IDLE_TIMEOUT_MS)
+  .option("--poll-ms <ms>", "Polling interval while waiting for Lovable to become idle", parseInteger, DEFAULT_IDLE_POLL_MS)
+  .option("--auto-resume", "Automatically click Resume queue / Continue queue while waiting for idle", false)
   .option("--json", "Print machine-readable JSON", false)
   .action(async (targetUrl, options) => {
     await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
+      const result = await waitForProjectIdle(page, {
+        timeoutMs: options.timeoutMs,
+        pollMs: options.pollMs,
+        autoResume: Boolean(options.autoResume)
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          projectUrl: normalizedUrl,
+          ...result
+        }, null, 2));
+      } else {
+        printIdleWaitResult({
+          projectUrl: normalizedUrl,
+          ...result
+        });
+      }
+
+      if (!result.ok) {
+        throw new Error(formatIdleWaitError(result, {
+          contextLabel: "wait-for-idle"
+        }));
+      }
+    });
+  });
+
+addProjectSessionOptions(
+  program
+    .command("speed")
+    .description("Run Lighthouse against the current project preview as a pragmatic Speed-surface fallback.")
+  .argument("<target-url>", "Lovable project URL")
+)
+  .option("--device <name>", "Audit desktop, mobile, or both", "both")
+  .option("--output-dir <path>", "Directory for Lighthouse JSON reports")
+  .option("--no-wait-for-idle", "Skip waiting for Lovable to become idle before the audit")
+  .option("--auto-resume", "Automatically click Resume queue / Continue queue while waiting for idle", false)
+  .option("--idle-timeout-ms <ms>", "How long to wait for Lovable to become idle before the audit", parseInteger, DEFAULT_IDLE_TIMEOUT_MS)
+  .option("--idle-poll-ms <ms>", "Polling interval while waiting for Lovable to become idle", parseInteger, DEFAULT_IDLE_POLL_MS)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
+      const idleResult = await ensureProjectIdleOrThrow(page, {
+        normalizedUrl,
+        waitForIdle: Boolean(options.waitForIdle),
+        autoResume: Boolean(options.autoResume),
+        timeoutMs: options.idleTimeoutMs,
+        pollMs: options.idlePollMs,
+        contextLabel: "speed audit"
+      });
       const previewInfo = await getProjectPreviewInfo(page);
       const devices = getSpeedDevices(options.device);
       const outputDir = resolveSpeedOutputDir(normalizedUrl, options.outputDir);
@@ -1810,6 +1865,7 @@ addProjectSessionOptions(
         projectUrl: normalizedUrl,
         source: "lighthouse-preview",
         previewUrl: redactPreviewUrl(previewInfo.src),
+        idle: idleResult,
         audits
       };
 
@@ -1819,6 +1875,168 @@ addProjectSessionOptions(
       }
 
       printSpeedState(state);
+    });
+  });
+
+addProjectSessionOptions(
+  program
+    .command("fidelity-loop")
+    .description("Iteratively prompt, wait for idle, verify expectations, and send follow-up prompts for remaining gaps.")
+    .argument("<target-url>", "Lovable project URL")
+    .argument("[prompt]", "Optional initial prompt")
+)
+  .option("--prompt-file <path>", "Read the initial prompt from a local file")
+  .option("--mode <mode>", "Switch Lovable to build or plan before sending prompts")
+  .option("--expect-text <text>", "Assert that preview body text contains this string", collectValues, [])
+  .option("--forbid-text <text>", "Assert that preview body text does not contain this string", collectValues, [])
+  .option("--expect-file <path>", "Read required preview assertions from a file, one per non-empty line")
+  .option("--forbid-file <path>", "Read forbidden preview assertions from a file, one per non-empty line")
+  .option("--max-iterations <n>", "Maximum prompt/verify iterations before stopping", parseInteger, 3)
+  .option("--output-dir <path>", "Directory for iteration summaries and screenshots")
+  .option("--desktop-only", "Only capture the desktop preview", false)
+  .option("--mobile-only", "Only capture the mobile preview", false)
+  .option("--settle-ms <ms>", "Extra wait time before each screenshot", parseInteger, 4000)
+  .option("--fail-on-console", "Treat preview console warnings/errors as blocking", false)
+  .option("--no-auto-split", "Send prompts as single Lovable messages even if they look too large")
+  .option("--allow-fragment", "Send prompts even if they look truncated or unfinished", false)
+  .option("--auto-resume", "Automatically click Resume queue / Continue queue while waiting for idle", false)
+  .option("--idle-timeout-ms <ms>", "How long to wait for Lovable to become idle before each verification", parseInteger, DEFAULT_IDLE_TIMEOUT_MS)
+  .option("--idle-poll-ms <ms>", "Polling interval while waiting for Lovable to become idle", parseInteger, DEFAULT_IDLE_POLL_MS)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, prompt, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl, headless }) => {
+      const initialPrompt = await resolveInitialPrompt({
+        prompt,
+        promptFile: options.promptFile
+      });
+      const expectText = await resolveAssertionValues({
+        values: options.expectText,
+        filePath: options.expectFile
+      });
+      const forbidText = await resolveAssertionValues({
+        values: options.forbidText,
+        filePath: options.forbidFile
+      });
+
+      if (expectText.length === 0 && forbidText.length === 0) {
+        throw new Error("fidelity-loop requires at least one --expect-text/--expect-file or --forbid-text/--forbid-file assertion.");
+      }
+
+      const modeResult = await ensurePromptModeReady(page, options.mode);
+      if (modeResult?.currentMode) {
+        console.log(`Lovable mode ready: ${modeResult.currentMode}`);
+      }
+
+      const variants = getVerifyVariants({
+        desktopOnly: options.desktopOnly,
+        mobileOnly: options.mobileOnly
+      });
+      const outputDir = resolveFidelityOutputDir(normalizedUrl, options.outputDir);
+      await fs.mkdir(outputDir, { recursive: true });
+
+      const result = {
+        projectUrl: normalizedUrl,
+        expectText,
+        forbidText,
+        maxIterations: options.maxIterations,
+        iterations: [],
+        success: false,
+        outputDir
+      };
+
+      let nextPrompt = initialPrompt;
+      for (let iteration = 1; iteration <= options.maxIterations; iteration += 1) {
+        const iterationLabel = `iteration ${iteration}/${options.maxIterations}`;
+        const iterationDir = path.join(outputDir, `iteration-${iteration}`);
+        let promptSequence = null;
+
+        if (nextPrompt) {
+          promptSequence = await runPromptSequence(page, {
+            normalizedUrl,
+            prompt: nextPrompt,
+            autoSplit: Boolean(options.autoSplit),
+            allowFragment: Boolean(options.allowFragment),
+            postSubmitTimeoutMs: 20_000,
+            verificationTimeoutMs: 600_000,
+            headless,
+            questionTimeoutMs: 8_000
+          });
+          printPromptSequenceLogs(promptSequence, {
+            prefix: `Fidelity ${iterationLabel}`
+          });
+        }
+
+        const idleResult = await ensureProjectIdleOrThrow(page, {
+          normalizedUrl,
+          waitForIdle: true,
+          autoResume: Boolean(options.autoResume),
+          timeoutMs: options.idleTimeoutMs,
+          pollMs: options.idlePollMs,
+          contextLabel: `fidelity ${iterationLabel}`
+        });
+
+        const verification = await runPreviewVerification({
+          page,
+          normalizedUrl,
+          outputDir: iterationDir,
+          headless: true,
+          settleMs: options.settleMs,
+          variants,
+          failOnConsole: Boolean(options.failOnConsole),
+          expectText,
+          forbidText,
+          sourceLabel: `Fidelity ${iterationLabel}`,
+          throwOnBlocking: false
+        });
+
+        const gaps = extractFidelityGaps(verification.summary);
+        result.iterations.push({
+          iteration,
+          promptSequence,
+          idle: idleResult,
+          summaryPath: verification.summaryPath,
+          blocking: verification.summary.blocking || null,
+          gaps
+        });
+
+        if (!verification.summary.blocking) {
+          result.success = true;
+          result.finalSummaryPath = verification.summaryPath;
+          break;
+        }
+
+        if (
+          gaps.missingExpectedTexts.length === 0 &&
+          gaps.forbiddenTextsFound.length === 0
+        ) {
+          throw new Error(
+            `Fidelity ${iterationLabel} failed for a non-text reason (${verification.summary.blocking.reason}). See ${verification.summaryPath}.`
+          );
+        }
+
+        if (iteration >= options.maxIterations) {
+          result.finalSummaryPath = verification.summaryPath;
+          break;
+        }
+
+        nextPrompt = buildFidelityFollowUpPrompt(gaps);
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        printFidelityLoopResult(result);
+      }
+
+      if (!result.success) {
+        const lastIteration = result.iterations[result.iterations.length - 1];
+        const summarySuffix = lastIteration?.summaryPath ? ` See ${lastIteration.summaryPath}.` : "";
+        const missing = lastIteration?.gaps?.missingExpectedTexts || [];
+        const forbidden = lastIteration?.gaps?.forbiddenTextsFound || [];
+        throw new Error(
+          `Fidelity loop stopped with remaining gaps. Missing: ${missing.join(", ") || "(none)"}; forbidden: ${forbidden.join(", ") || "(none)"}.${summarySuffix}`
+        );
+      }
     });
   });
 
@@ -1833,6 +2051,10 @@ program
   .option("--desktop-only", "Only capture the desktop preview", false)
   .option("--mobile-only", "Only capture the mobile preview", false)
   .option("--headed", "Run the extraction and preview captures visibly", false)
+  .option("--no-wait-for-idle", "Skip waiting for Lovable to become idle before preview capture")
+  .option("--auto-resume", "Automatically click Resume queue / Continue queue while waiting for idle", false)
+  .option("--idle-timeout-ms <ms>", "How long to wait for Lovable to become idle before preview capture", parseInteger, DEFAULT_IDLE_TIMEOUT_MS)
+  .option("--idle-poll-ms <ms>", "Polling interval while waiting for Lovable to become idle", parseInteger, DEFAULT_IDLE_POLL_MS)
   .option("--settle-ms <ms>", "Extra wait time before each screenshot", parseInteger, 4000)
   .option("--fail-on-console", "Treat preview console warnings/errors as blocking", false)
   .option("--expect-text <text>", "Assert that preview body text contains this string", collectValues, [])
@@ -1870,6 +2092,15 @@ program
           `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
         );
       }
+
+      await ensureProjectIdleOrThrow(page, {
+        normalizedUrl,
+        waitForIdle: Boolean(options.waitForIdle),
+        autoResume: Boolean(options.autoResume),
+        timeoutMs: options.idleTimeoutMs,
+        pollMs: options.idlePollMs,
+        contextLabel: "preview verification"
+      });
 
       await runPreviewVerification({
         page,
@@ -2611,6 +2842,285 @@ async function ensurePromptModeReady(page, mode) {
   };
 }
 
+async function resolveInitialPrompt({
+  prompt,
+  promptFile
+} = {}) {
+  if (prompt && promptFile) {
+    throw new Error("Pass either a positional prompt or --prompt-file, not both.");
+  }
+
+  if (promptFile) {
+    const resolvedPath = path.resolve(promptFile);
+    return await fs.readFile(resolvedPath, "utf8");
+  }
+
+  if (typeof prompt === "string") {
+    return prompt;
+  }
+
+  return null;
+}
+
+async function resolveAssertionValues({
+  values = [],
+  filePath
+} = {}) {
+  const resolved = Array.isArray(values) ? [...values] : [];
+  if (!filePath) {
+    return resolved;
+  }
+
+  const raw = await fs.readFile(path.resolve(filePath), "utf8");
+  return [
+    ...resolved,
+    ...parseAssertionLines(raw)
+  ];
+}
+
+function formatIdleWaitError(result, {
+  contextLabel = "idle wait"
+} = {}) {
+  const lastStatus = result?.state?.status || result?.reason || "unknown";
+  const excerpt = result?.state?.bodyExcerpt
+    ? ` Last page text excerpt: ${JSON.stringify(result.state.bodyExcerpt.slice(0, 200))}.`
+    : "";
+
+  if (result?.reason === "queue_paused") {
+    return `Lovable queue is paused during ${contextLabel}. Re-run with --auto-resume or resume it manually.${excerpt}`;
+  }
+
+  if (result?.reason === "waiting_for_input") {
+    return `Lovable is waiting for input during ${contextLabel}. Answer the open Questions card before continuing.${excerpt}`;
+  }
+
+  if (result?.reason === "error") {
+    return `Lovable shows a runtime/build error surface during ${contextLabel}.${excerpt}`;
+  }
+
+  if (result?.reason === "timeout") {
+    return `Timed out waiting for Lovable to become idle during ${contextLabel}. Last observed state: ${lastStatus}.${excerpt}`;
+  }
+
+  return `Lovable did not become idle during ${contextLabel}. Last observed state: ${lastStatus}.${excerpt}`;
+}
+
+function printIdleWaitResult(result) {
+  console.log(`Idle wait result: ${result.ok ? "idle" : result.reason}`);
+  console.log(`Observed state: ${result.state?.status || result.reason || "unknown"}`);
+  console.log(`Idle streak: ${result.idleStreak ?? 0}`);
+  console.log(`Resume attempts: ${result.resumeAttempts ?? 0}`);
+  if (result.state?.visibleActionLabels?.length) {
+    console.log(`Visible actions: ${result.state.visibleActionLabels.join(", ")}`);
+  }
+}
+
+async function ensureProjectIdleOrThrow(page, {
+  normalizedUrl,
+  waitForIdle = true,
+  autoResume = false,
+  timeoutMs = DEFAULT_IDLE_TIMEOUT_MS,
+  pollMs = DEFAULT_IDLE_POLL_MS,
+  contextLabel = "idle wait"
+} = {}) {
+  if (!waitForIdle) {
+    const state = await getProjectIdleState(page, {
+      timeoutMs: Math.min(pollMs, 750),
+      pollMs: Math.min(pollMs, 250)
+    });
+    return {
+      ok: true,
+      reason: "skipped",
+      idleStreak: 0,
+      resumeAttempts: 0,
+      projectUrl: normalizedUrl,
+      state
+    };
+  }
+
+  const result = await waitForProjectIdle(page, {
+    timeoutMs,
+    pollMs,
+    autoResume
+  });
+  const enriched = {
+    ...result,
+    projectUrl: normalizedUrl
+  };
+
+  if (!enriched.ok) {
+    throw new Error(formatIdleWaitError(enriched, {
+      contextLabel
+    }));
+  }
+
+  return enriched;
+}
+
+async function runPromptSequence(page, {
+  normalizedUrl,
+  prompt,
+  autoSplit = true,
+  allowFragment = false,
+  selector,
+  submitSelector,
+  postSubmitTimeoutMs = 20_000,
+  verificationTimeoutMs = 600_000,
+  headless = false,
+  questionTimeoutMs = 8_000
+} = {}) {
+  if (typeof prompt !== "string" || prompt.trim().length === 0) {
+    return [];
+  }
+
+  const warnings = assertPromptLooksComplete(prompt, {
+    allowFragment
+  });
+  const parts = buildPromptSequence(prompt, {
+    autoSplit
+  });
+  const sequence = [];
+
+  for (const part of parts) {
+    const isFinalPart = part.index === part.total;
+    const turnPostSubmitTimeoutMs = isFinalPart
+      ? (part.total > 1 ? Math.max(postSubmitTimeoutMs, 60_000) : postSubmitTimeoutMs)
+      : Math.min(postSubmitTimeoutMs, 8_000);
+    const turn = await runPromptTurn(page, {
+      normalizedUrl,
+      prompt: part.prompt,
+      selector,
+      submitSelector,
+      postSubmitTimeoutMs: turnPostSubmitTimeoutMs,
+      verificationTimeoutMs,
+      headless,
+      requireLocalAck: isFinalPart && part.total === 1,
+      requirePersistence: isFinalPart,
+      persistenceRetries: isFinalPart && part.total > 1 ? 2 : 0,
+      persistenceRetryDelayMs: 5_000,
+      persistenceSettleMs: isFinalPart && part.total > 1 ? 10_000 : 6_000
+    });
+
+    const entry = {
+      ...part,
+      warnings: part.index === 1 ? warnings : [],
+      ...turn
+    };
+    sequence.push(entry);
+
+    if (part.total > 1 && part.index < part.total) {
+      const questionState = await getProjectQuestionState(page, {
+        timeoutMs: Math.min(questionTimeoutMs, 1_000),
+        pollMs: 250
+      }).catch(() => ({
+        open: false
+      }));
+
+      if (questionState.open) {
+        throw new Error(
+          `Lovable opened a Questions card before the final prompt part (${part.index}/${part.total}). Shorten the prompt or answer the question manually before continuing.`
+        );
+      }
+    }
+  }
+
+  return sequence;
+}
+
+function printPromptSequenceLogs(sequence, {
+  prefix
+} = {}) {
+  if (!Array.isArray(sequence) || sequence.length === 0) {
+    return;
+  }
+
+  const basePrefix = prefix ? `${prefix}: ` : "";
+  const firstEntry = sequence[0];
+  if (firstEntry?.warnings?.length > 0) {
+    console.log(`${basePrefix}Prompt warnings: ${firstEntry.warnings.join(" ")}`);
+  }
+
+  if (sequence.length > 1) {
+    console.log(`${basePrefix}Prompt auto-split into ${sequence.length} parts.`);
+  }
+
+  sequence.forEach((entry) => {
+    const label = sequence.length > 1
+      ? `${basePrefix}Prompt part ${entry.index}/${entry.total}`
+      : `${basePrefix}Prompt`;
+    console.log(`${label} filled via ${entry.fillResult.method} (${entry.fillResult.tagName}).`);
+    console.log(`${label} submitted via ${entry.submitResult.method}.`);
+    if (entry.chatAccepted?.ok) {
+      console.log(`${label}: Lovable accepted the chat request on the server.`);
+    }
+    if (!entry.postSubmit?.ok && entry.total > 1) {
+      console.log(`${label}: no immediate local echo detected; relying on server acceptance and final persistence checks for this multipart prompt.`);
+    }
+    if (entry.verificationResolved?.ok) {
+      console.log(`${label}: Interactive verification cleared.`);
+    }
+    if (entry.persisted?.ok) {
+      console.log(`${label}: Lovable acknowledged the prompt and it persisted after reload.`);
+    }
+  });
+}
+
+function resolveFidelityOutputDir(targetUrl, outputDir) {
+  if (outputDir) {
+    return path.resolve(outputDir);
+  }
+
+  const projectId = targetUrl.match(/\/projects\/([^/?#]+)/)?.[1] || "project";
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return path.resolve(process.cwd(), "output", "fidelity-loop", `${projectId}-${timestamp}`);
+}
+
+function extractFidelityGaps(summary = {}) {
+  const missingExpectedTexts = [];
+  const forbiddenTextsFound = [];
+  const missingSeen = new Set();
+  const forbiddenSeen = new Set();
+
+  for (const capture of summary.captures || []) {
+    for (const value of capture?.snapshot?.missingExpectedTexts || []) {
+      if (!missingSeen.has(value)) {
+        missingSeen.add(value);
+        missingExpectedTexts.push(value);
+      }
+    }
+    for (const value of capture?.snapshot?.forbiddenTextsFound || []) {
+      if (!forbiddenSeen.has(value)) {
+        forbiddenSeen.add(value);
+        forbiddenTextsFound.push(value);
+      }
+    }
+  }
+
+  return {
+    missingExpectedTexts,
+    forbiddenTextsFound
+  };
+}
+
+function printFidelityLoopResult(result) {
+  console.log(`Fidelity loop project: ${result.projectUrl}`);
+  console.log(`Success: ${result.success ? "yes" : "no"}`);
+  console.log(`Iterations: ${result.iterations.length}/${result.maxIterations}`);
+  console.log(`Output: ${result.outputDir}`);
+
+  result.iterations.forEach((iteration) => {
+    const blockingReason = iteration.blocking?.reason || "none";
+    console.log(`[${iteration.iteration}] blocking=${blockingReason}`);
+    console.log(`  summary=${iteration.summaryPath}`);
+    console.log(
+      `  missing=${iteration.gaps?.missingExpectedTexts?.join(", ") || "(none)"}`
+    );
+    console.log(
+      `  forbidden=${iteration.gaps?.forbiddenTextsFound?.join(", ") || "(none)"}`
+    );
+  });
+}
+
 async function runPromptTurn(page, {
   normalizedUrl,
   prompt,
@@ -2618,7 +3128,12 @@ async function runPromptTurn(page, {
   submitSelector,
   postSubmitTimeoutMs = 20_000,
   verificationTimeoutMs = 600_000,
-  headless = false
+  headless = false,
+  requireLocalAck = true,
+  requirePersistence = true,
+  persistenceRetries = 0,
+  persistenceRetryDelayMs = 5_000,
+  persistenceSettleMs = 6_000
 }) {
   const fillResult = await fillPrompt(page, prompt, { selector });
   await page.waitForTimeout(400);
@@ -2656,7 +3171,7 @@ async function runPromptTurn(page, {
       }
 
       console.log("Interactive verification cleared. Checking whether the prompt persisted after reload.");
-    } else {
+    } else if (requireLocalAck) {
       throw new Error(
         "Lovable did not acknowledge the prompt within the expected time."
       );
@@ -2677,27 +3192,47 @@ async function runPromptTurn(page, {
     );
   }
 
-  const persisted = await confirmPromptPersistsAfterReload(page, {
-    prompt,
-    timeoutMs: postSubmitTimeoutMs
-  });
+  let persisted = {
+    ok: false,
+    reason: "skipped",
+    state: null
+  };
 
-  if (!persisted.ok) {
-    if (persisted.reason === "verification_required") {
-      throw new Error(
-        "Lovable requested another interactive verification during the reload check. Re-run without --headless and complete the verification in the browser."
-      );
+  if (requirePersistence) {
+    for (let attempt = 0; attempt <= persistenceRetries; attempt += 1) {
+      persisted = await confirmPromptPersistsAfterReload(page, {
+        prompt,
+        timeoutMs: postSubmitTimeoutMs,
+        settleMs: persistenceSettleMs
+      });
+
+      if (persisted.ok || persisted.reason === "verification_required" || attempt >= persistenceRetries) {
+        break;
+      }
+
+      await page.waitForTimeout(persistenceRetryDelayMs);
     }
 
-    throw new Error(
-      "Lovable showed the prompt locally, but it did not persist after a page reload."
-    );
+    if (!persisted.ok) {
+      if (persisted.reason === "verification_required") {
+        throw new Error(
+          "Lovable requested another interactive verification during the reload check. Re-run without --headless and complete the verification in the browser."
+        );
+      }
+
+      throw new Error(
+        "Lovable showed the prompt locally, but it did not persist after a page reload."
+      );
+    }
   }
 
   return {
     fillResult,
     submitResult,
-    verificationResolved
+    verificationResolved,
+    chatAccepted,
+    postSubmit,
+    persisted
   };
 }
 
@@ -2749,7 +3284,8 @@ async function runPreviewVerification({
   failOnConsole = false,
   expectText = [],
   forbidText = [],
-  sourceLabel = "Preview"
+  sourceLabel = "Preview",
+  throwOnBlocking = true
 }) {
   const previewInfo = await getProjectPreviewInfo(page);
   return runUrlVerification({
@@ -2763,7 +3299,8 @@ async function runPreviewVerification({
     expectText,
     forbidText,
     sourceLabel,
-    summarySourceKey: "previewSource"
+    summarySourceKey: "previewSource",
+    throwOnBlocking
   });
 }
 
@@ -2778,7 +3315,8 @@ async function runUrlVerification({
   expectText = [],
   forbidText = [],
   sourceLabel = "Preview",
-  summarySourceKey = "captureSource"
+  summarySourceKey = "captureSource",
+  throwOnBlocking = true
 }) {
   if (!captureUrl) {
     throw new Error(`${sourceLabel} URL is missing.`);
@@ -2851,7 +3389,7 @@ async function runUrlVerification({
   await fs.writeFile(summaryPath, JSON.stringify(summary, null, 2));
   console.log(`Verification summary: ${summaryPath}`);
 
-  if (blockingCapture) {
+  if (blockingCapture && throwOnBlocking) {
     throw new Error(
       `${sourceLabel} verification found blocking issues in the ${blockingCapture.variant} capture (${summary.blocking.reason}). See ${summaryPath}.`
     );

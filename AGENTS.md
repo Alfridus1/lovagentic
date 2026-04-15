@@ -77,6 +77,7 @@ npm run start -- errors "https://lovable.dev/projects/..."
 npm run start -- error-action "https://lovable.dev/projects/..." "Try to fix"
 npm run start -- findings "https://lovable.dev/projects/..."
 npm run start -- chat-loop "https://lovable.dev/projects/..." "Outline the next changes" --mode plan --action "Approve"
+npm run start -- wait-for-idle "https://lovable.dev/projects/..."
 npm run start -- verify "https://lovable.dev/projects/..."
 npm run start -- publish "https://lovable.dev/projects/..."
 npm run start -- publish-settings "https://lovable.dev/projects/..."
@@ -86,6 +87,7 @@ npm run start -- project-settings "https://lovable.dev/projects/..."
 npm run start -- git "https://lovable.dev/projects/..."
 npm run start -- code "https://lovable.dev/projects/..."
 npm run start -- speed "https://lovable.dev/projects/..."
+npm run start -- fidelity-loop "https://lovable.dev/projects/..."
 npm run start -- workspace "https://lovable.dev/projects/..."
 npm run start -- knowledge "https://lovable.dev/projects/..."
 ```
@@ -123,6 +125,7 @@ For a new machine or new agent run:
 9. `npm run start -- git "<project-url>" --json`
 10. `npm run start -- code "<project-url>" --limit 20 --json`
 11. `npm run start -- speed "<project-url>" --device desktop --json`
+12. `npm run start -- wait-for-idle "<project-url>" --json`
 
 For prompt regression checks:
 
@@ -141,7 +144,9 @@ For a single end-to-end proposal run:
 - project creation through build URLs
 - dashboard project/workspace listing through the logged-in `/dashboard` page
 - prompt submission with server-side accept checks
+- idle-state detection through `wait-for-idle`
 - prompt guard for obviously truncated prompts
+- automatic prompt splitting for large Lovable messages
 - `build` and `plan` composer mode switching
 - reading Lovable clarification cards through `questions`
 - answering free-text Lovable clarification cards through `question-answer`
@@ -169,6 +174,7 @@ For a single end-to-end proposal run:
 - project-bound Git/GitHub inspection
 - GitHub-backed code reading through the connected repo
 - Lighthouse-backed speed auditing against the current preview URL
+- iterative preview assertion repair through `fidelity-loop`
 - workspace/account settings inspection across the visible settings sections
 - knowledge inspection, with guarded writes that fail if Lovable does not persist after reload
 
@@ -179,6 +185,7 @@ For a single end-to-end proposal run:
 - headless login/prompt flows can still fail on verification challenges
 - visual verification is screenshot/runtime-based, not a golden pixel diff
 - knowledge writes are guarded: the CLI now errors when Lovable does not persist the edit after reload, and current headless smoke runs still hit that product/UI limitation
+- long multipart prompts are materially improved, but the exact Lovable queue/render behavior can still vary across projects and active queue state
 
 ## Important Product Observation
 

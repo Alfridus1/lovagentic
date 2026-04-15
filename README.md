@@ -202,6 +202,25 @@ npm run start -- chat-loop "https://lovable.dev/projects/your-project" "Outline 
   --action "Approve"
 ```
 
+Wait until Lovable is actually idle:
+
+```bash
+npm run start -- wait-for-idle "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --headless \
+  --json
+```
+
+Send a long prompt safely. Large prompts are auto-split by default:
+
+```bash
+npm run start -- prompt "https://lovable.dev/projects/your-project" "$(cat ./long-prompt.txt)" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --mode plan
+```
+
 Send a prompt and immediately verify the resulting live preview:
 
 ```bash
@@ -264,6 +283,15 @@ npm run start -- verify "https://lovable.dev/projects/your-project" \
   --profile-dir /tmp/lovable-cli-profile \
   --seed-desktop-session \
   --output-dir ./output/verify/latest
+```
+
+By default `verify` waits for Lovable idle first. Skip that only when you intentionally want a mid-build capture:
+
+```bash
+npm run start -- verify "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --no-wait-for-idle
 ```
 
 Fail the verify command if the preview emits console warnings/errors:
@@ -370,6 +398,17 @@ npm run start -- speed "https://lovable.dev/projects/your-project" \
   --device both
 ```
 
+Iterate until concrete preview assertions pass:
+
+```bash
+npm run start -- fidelity-loop "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --expect-file ./expectations.txt \
+  --forbid-file ./forbidden.txt \
+  --max-iterations 3
+```
+
 Inspect workspace/account settings without mutating them:
 
 ```bash
@@ -405,8 +444,10 @@ npm run start -- knowledge "https://lovable.dev/projects/your-project" \
 - `error-action` clicks one of those runtime/build error actions and, for recovery clicks, checks whether Lovable accepted the fix request on the server.
 - `findings` opens the inline `View findings` security pane and extracts the visible scan status, pane actions, counts, and issue table rows.
 - `chat-loop` combines those pieces: it can send a prompt, wait for the relevant action label to appear, click it, and then optionally run preview verification.
+- `wait-for-idle` classifies Lovable as `idle`, `busy`, `queue_paused`, `waiting_for_input`, or `error` from page state instead of relying on generic proposal chips.
 - `prompt --answer-question` and `chat-loop --answer-question` can auto-answer a delayed Lovable `Questions` card, but the follow-up may appear noticeably later than the original chat accept, so tune `--question-timeout-ms` when needed.
 - `prompt` now waits for a real server-side `/chat` accept before it trusts the UI and then confirms persistence with a reload.
+- `prompt`, `chat-loop`, and `fidelity-loop` auto-split large prompts by default. Use `--no-auto-split` only if you explicitly want one large Lovable turn.
 - `prompt --verify` runs the same preview capture path immediately after a persisted prompt.
 - `publish` walks the Lovable publish wizard, waits for the deployment request, and then probes the live URL until it returns success.
 - `publish` currently follows the default Lovable publish path: suggested `.lovable.app` subdomain and the default visibility selection shown in the wizard.
@@ -416,7 +457,7 @@ npm run start -- knowledge "https://lovable.dev/projects/your-project" \
 - `project-settings` reads the real `/settings` page and can safely update visibility, category, `Hide Lovable badge`, `Disable analytics`, and rename.
 - `git` reads the project-bound Git/GitHub state from the toolbar when possible and falls back to the settings pages for generic provider management.
 - `code` is a pragmatic fallback that reads the connected GitHub repo through `gh api`; it does not scrape Lovable's in-app code editor DOM.
-- `speed` is a pragmatic fallback that audits the current preview URL with Lighthouse; it does not scrape Lovable's in-app speed cards directly.
+- `speed` is a pragmatic fallback that audits the current preview URL with Lighthouse; it does not scrape Lovable's in-app speed cards directly, and it waits for idle by default.
 - `workspace` reads the visible workspace/account settings pages (`workspace`, `people`, `plans-credits`, `cloud-ai-balance`, `workspace-domains`, `privacy-security`, `account`) in inspect-only mode.
 - `knowledge` can read project/workspace knowledge and attempts writes, but it now fails explicitly if Lovable does not persist the edit after reload.
 - `domain` inspects the `/settings/domains` page, can update the default `.lovable.app` slug, and can submit `Connect domain` when the requested domain becomes visible afterward.
@@ -424,6 +465,8 @@ npm run start -- knowledge "https://lovable.dev/projects/your-project" \
 - `verify` resolves the live preview iframe, captures desktop and mobile screenshots, and writes `summary.json` with console errors, failed requests, and basic DOM stats.
 - Preview verification now also checks for horizontal overflow / obvious out-of-viewport elements and can assert `--expect-text` / `--forbid-text`.
 - `--fail-on-console` turns preview console warnings/errors into a blocking verify failure. Without it, console issues are still reported in `summary.json` but do not fail the command.
+- `--auto-resume` only clicks exact queue labels `Resume queue` and `Continue queue`; it does not click generic resume-like controls.
+- `fidelity-loop` uses the same verification surface plus deterministic follow-up prompts for still-missing expected text or still-present forbidden text.
 - `import-desktop-session` is best-effort. Chromium/Electron session reuse on macOS is not guaranteed, so manual `login` is the reliable path.
 - `import-desktop-session` copies desktop auth/storage into Playwright's `Default/` profile layout.
 - The publish surface also exposes `Add custom domain`, `Edit settings`, live visitor counts, and a security scan entry point. `Edit settings`, the default `.lovable.app` slug, and the direct `Connect domain` dialog are automated now; registrar purchase is still out of scope.

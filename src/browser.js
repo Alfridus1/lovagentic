@@ -4,6 +4,14 @@ import path from "node:path";
 import { chromium } from "playwright";
 
 import { DEFAULT_BASE_URL } from "./config.js";
+import {
+  classifyIdleStateSnapshot,
+  DEFAULT_IDLE_POLL_MS,
+  DEFAULT_IDLE_STREAK_TARGET,
+  DEFAULT_IDLE_TIMEOUT_MS,
+  DEFAULT_QUEUE_RESUME_ATTEMPTS,
+  QUEUE_RESUME_ACTION_LABELS
+} from "./orchestration.js";
 
 const INPUT_SELECTORS = [
   "textarea",
@@ -461,6 +469,98 @@ export async function listChatActions(page, {
   }
 
   return lastSnapshot?.actions || [];
+}
+
+async function listVisiblePageActions(page) {
+  return page.locator(ACTIONABLE_SELECTORS).evaluateAll((elements) => {
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const isRendered = (element) => {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0 &&
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < window.innerHeight &&
+        rect.left < window.innerWidth;
+    };
+
+    return elements
+      .map((element, domIndex) => {
+        if (!(element instanceof HTMLElement) || !isRendered(element)) {
+          return null;
+        }
+
+        const rect = element.getBoundingClientRect();
+        const text = normalize(element.textContent || "");
+        const ariaLabel = normalize(element.getAttribute("aria-label") || "");
+        const label = text || ariaLabel;
+        if (!label) {
+          return null;
+        }
+
+        return {
+          domIndex,
+          label,
+          text,
+          ariaLabel,
+          tagName: element.tagName.toLowerCase(),
+          disabled: element.matches("[disabled],[aria-disabled='true'],[data-disabled='true']"),
+          x: Math.round(rect.x),
+          y: Math.round(rect.y)
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        if (left.y !== right.y) {
+          return left.y - right.y;
+        }
+        return left.x - right.x;
+      });
+  });
+}
+
+async function clickVisiblePageActionExact(page, {
+  labels,
+  timeoutMs = 15_000,
+  settleMs = 1_000
+} = {}) {
+  const normalizedLabels = labels
+    .map((value) => normalizeText(value).toLowerCase())
+    .filter(Boolean);
+
+  if (normalizedLabels.length === 0) {
+    throw new Error("Expected at least one visible page action label.");
+  }
+
+  const actions = await listVisiblePageActions(page);
+  const target = actions.find((action) => {
+    return !action.disabled && normalizedLabels.includes(normalizeText(action.label).toLowerCase());
+  });
+
+  if (!target) {
+    return null;
+  }
+
+  const locator = page.locator(ACTIONABLE_SELECTORS).nth(target.domIndex);
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  try {
+    await locator.click({ timeout: timeoutMs });
+  } catch {
+    await locator.click({ timeout: Math.min(timeoutMs, 5_000), force: true }).catch(async () => {
+      await locator.evaluate((element) => element.click());
+    });
+  }
+
+  await page.waitForTimeout(settleMs);
+  return target;
 }
 
 export async function clickChatAction(page, {
@@ -1214,6 +1314,141 @@ export async function clickRuntimeErrorAction(page, {
       message: null,
       actions: []
     }))
+  };
+}
+
+export async function getProjectIdleState(page, {
+  timeoutMs = 750,
+  pollMs = 250
+} = {}) {
+  const [questionState, runtimeErrorState, visibleActions, bodyText] = await Promise.all([
+    getProjectQuestionState(page, {
+      timeoutMs,
+      pollMs
+    }).catch(() => ({
+      open: false,
+      actions: []
+    })),
+    getProjectRuntimeErrorState(page, {
+      timeoutMs,
+      pollMs
+    }).catch(() => ({
+      open: false,
+      actions: []
+    })),
+    listVisiblePageActions(page).catch(() => []),
+    page.evaluate(() => document.body?.innerText || "").catch(() => "")
+  ]);
+
+  const classification = classifyIdleStateSnapshot({
+    bodyText,
+    visibleActionLabels: visibleActions.map((action) => action.label),
+    questionOpen: questionState.open,
+    runtimeErrorOpen: runtimeErrorState.open
+  });
+
+  return {
+    status: classification.status,
+    details: classification.details,
+    bodyText,
+    bodyExcerpt: String(bodyText || "").slice(0, 2_000),
+    visibleActionLabels: Array.from(new Set(visibleActions.map((action) => action.label))),
+    questionState,
+    runtimeErrorState
+  };
+}
+
+export async function clickQueueResume(page, {
+  timeoutMs = 15_000,
+  settleMs = 1_000
+} = {}) {
+  return clickVisiblePageActionExact(page, {
+    labels: QUEUE_RESUME_ACTION_LABELS,
+    timeoutMs,
+    settleMs
+  });
+}
+
+export async function waitForProjectIdle(page, {
+  timeoutMs = DEFAULT_IDLE_TIMEOUT_MS,
+  pollMs = DEFAULT_IDLE_POLL_MS,
+  idleStreakTarget = DEFAULT_IDLE_STREAK_TARGET,
+  autoResume = false,
+  maxResumeAttempts = DEFAULT_QUEUE_RESUME_ATTEMPTS
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let idleStreak = 0;
+  let resumeAttempts = 0;
+  let lastState = await getProjectIdleState(page, {
+    timeoutMs: Math.min(pollMs, 750),
+    pollMs: Math.min(pollMs, 250)
+  });
+
+  while (Date.now() < deadline) {
+    lastState = await getProjectIdleState(page, {
+      timeoutMs: Math.min(pollMs, 750),
+      pollMs: Math.min(pollMs, 250)
+    });
+
+    if (lastState.status === "idle") {
+      idleStreak += 1;
+      if (idleStreak >= idleStreakTarget) {
+        return {
+          ok: true,
+          reason: "idle",
+          idleStreak,
+          resumeAttempts,
+          state: lastState
+        };
+      }
+    } else {
+      idleStreak = 0;
+
+      if (lastState.status === "queue_paused" && autoResume) {
+        if (resumeAttempts >= maxResumeAttempts) {
+          return {
+            ok: false,
+            reason: "queue_paused",
+            idleStreak,
+            resumeAttempts,
+            state: lastState
+          };
+        }
+
+        const resumed = await clickQueueResume(page, {
+          timeoutMs: Math.max(5_000, Math.min(pollMs, 15_000))
+        });
+        if (!resumed) {
+          return {
+            ok: false,
+            reason: "queue_paused",
+            idleStreak,
+            resumeAttempts,
+            state: lastState
+          };
+        }
+
+        resumeAttempts += 1;
+      } else if (["queue_paused", "waiting_for_input", "error"].includes(lastState.status)) {
+        return {
+          ok: false,
+          reason: lastState.status,
+          idleStreak,
+          resumeAttempts,
+          state: lastState
+        };
+      }
+    }
+
+    await page.waitForTimeout(pollMs);
+  }
+
+  return {
+    ok: false,
+    reason: "timeout",
+    idleStreak,
+    resumeAttempts,
+    state: lastState
   };
 }
 

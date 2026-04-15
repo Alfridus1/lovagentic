@@ -28,7 +28,9 @@ Use this skill for:
 - project-bound Git/GitHub inspection through `git`
 - GitHub-backed code reading through `code`
 - Lighthouse-backed preview audits through `speed`
+- explicit idle-state detection through `wait-for-idle`
 - prompt-guarded prompt submission plus delayed clarification handling through `questions` / `question-answer`
+- iterative preview assertion repair through `fidelity-loop`
 - `build` / `plan` mode switching
 - prompt submission and prompt-to-action loops
 - visible proposal actions near the composer
@@ -88,6 +90,11 @@ npm run start -- chat-loop "<project-url>" "<prompt>" \
   --profile-dir /tmp/lovable-cli-task \
   --seed-desktop-session
 
+npm run start -- wait-for-idle "<project-url>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session \
+  --headless
+
 npm run start -- errors "<project-url>" \
   --profile-dir /tmp/lovable-cli-task \
   --seed-desktop-session
@@ -122,6 +129,11 @@ npm run start -- speed "<project-url>" \
   --seed-desktop-session \
   --device desktop
 
+npm run start -- fidelity-loop "<project-url>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session \
+  --expect-file ./expectations.txt
+
 npm run start -- verify "<project-url>" \
   --profile-dir /tmp/lovable-cli-task \
   --seed-desktop-session
@@ -146,5 +158,7 @@ npm run start -- publish "<project-url>" \
 - `Try to fix` lives on the runtime error surface, not in chat actions.
 - `View findings` opens an inline pane, not a modal.
 - `code` and `speed` are pragmatic fallbacks: GitHub + Lighthouse, not DOM scraping of Lovable's in-app panes.
+- `wait-for-idle` uses page state, queue labels, runtime errors, and question cards; generic proposal chips do not count as build activity.
+- long prompts auto-split by default; use `--no-auto-split` only when you explicitly want a single large Lovable turn.
 - `knowledge` writes are guarded. If Lovable does not persist after reload, treat that as a product/UI limitation and fail loudly instead of pretending success.
 - Confirm persistence after reload or navigation when a Lovable action claims success.
