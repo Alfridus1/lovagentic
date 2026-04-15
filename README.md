@@ -103,6 +103,65 @@ npm run start -- prompt "https://lovable.dev/projects/your-project" "Outline the
   --mode plan
 ```
 
+List visible chat-side actions when Lovable shows a proposal or follow-up UI:
+
+```bash
+npm run start -- actions "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session
+```
+
+Click a visible proposal action such as `Approve`:
+
+```bash
+npm run start -- action "https://lovable.dev/projects/your-project" "Approve" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session
+```
+
+Read the visible runtime/build error surface when Lovable shows `Try to fix`:
+
+```bash
+npm run start -- errors "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session
+```
+
+Click the visible runtime/build recovery action:
+
+```bash
+npm run start -- error-action "https://lovable.dev/projects/your-project" "Try to fix" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session
+```
+
+Open Lovable's inline security findings pane and extract the visible issues:
+
+```bash
+npm run start -- findings "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session
+```
+
+Get the same findings as JSON:
+
+```bash
+npm run start -- findings "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --json
+```
+
+Run a full proposal loop in one command:
+
+```bash
+npm run start -- chat-loop "https://lovable.dev/projects/your-project" "Outline the next changes before touching code." \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --mode plan \
+  --action "Approve"
+```
+
 Send a prompt and immediately verify the resulting live preview:
 
 ```bash
@@ -221,6 +280,12 @@ npm run start -- domain "https://lovable.dev/projects/your-project" \
 - `mode` switches the main Lovable composer between `build` and `plan`.
 - `prompt` uses Playwright and a persistent profile at `~/.lovable-cli/profile` by default.
 - `prompt --mode plan|build` switches the composer before it types and submits.
+- `actions` lists visible chat-side buttons near the composer, so agents can see proposal actions like `Approve`, `Skip`, or `Verify it works`.
+- `action` clicks one of those visible chat-side buttons by label, which is the main path for button-driven follow-ups after plan suggestions.
+- `errors` reads Lovable's separate runtime/build error surface, including recovery buttons like `Try to fix` and `Show logs`.
+- `error-action` clicks one of those runtime/build error actions and, for recovery clicks, checks whether Lovable accepted the fix request on the server.
+- `findings` opens the inline `View findings` security pane and extracts the visible scan status, pane actions, counts, and issue table rows.
+- `chat-loop` combines those pieces: it can send a prompt, wait for the relevant action label to appear, click it, and then optionally run preview verification.
 - `prompt` now waits for a real server-side `/chat` accept before it trusts the UI and then confirms persistence with a reload.
 - `prompt --verify` runs the same preview capture path immediately after a persisted prompt.
 - `publish` walks the Lovable publish wizard, waits for the deployment request, and then probes the live URL until it returns success.

@@ -9,6 +9,7 @@ const INPUT_SELECTORS = [
   "[role='textbox']",
   "div[contenteditable='true']"
 ];
+const ACTIONABLE_SELECTORS = "button,[role='button'],a[role='button']";
 
 const SUBMIT_SELECTORS = [
   "button[aria-label*='Send' i]",
@@ -28,6 +29,12 @@ const PUBLISH_VISIBILITY_PATTERN = /Who can see the website|Anyone with the URL|
 const PUBLISH_WEBSITE_INFO_PATTERN = /Add info to help people find your website|Icon & title|Description|Social image/i;
 const DOMAIN_SETTINGS_PATTERN = /Domains|Publish your project to custom domains|Edit URL|Connect existing domain/i;
 const DOMAIN_EDIT_URL_PATTERN = /Edit URL subdomain|Change the URL for your published project/i;
+const FINDINGS_ACTION_LABEL = "View findings";
+const FINDINGS_STATUS_PATTERN = /Out of date|Up to date|Scanning|Scan in progress|In progress|Fresh|Updated|Needs attention|Requires update|Stale/i;
+const FINDINGS_STATUS_EXACT_PATTERN = /^(Out of date|Up to date|Scanning|Scan in progress|In progress|Fresh|Updated|Needs attention|Requires update|Stale)$/i;
+const RUNTIME_ERROR_TITLE_PATTERN = /^Error$/i;
+const RUNTIME_ERROR_MESSAGE_PATTERN = /The app encountered an error/i;
+const RUNTIME_ERROR_ACTION_PATTERN = /Try to fix|Show logs/i;
 
 export async function launchLovableContext({
   profileDir,
@@ -262,6 +269,822 @@ export async function submitPrompt(page, {
   );
 }
 
+async function waitForChatComposer(page, {
+  timeoutMs = 15_000,
+  pollMs = 250
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const formVisible = await page.locator("form#chat-input").first().isVisible().catch(() => false);
+    const inputVisible = await page.locator('[aria-label="Chat input"]').first().isVisible().catch(() => false);
+    if (formVisible || inputVisible) {
+      return true;
+    }
+    await page.waitForTimeout(pollMs);
+  }
+
+  return false;
+}
+
+async function getVisibleChatActionSnapshot(page) {
+  return page.locator(ACTIONABLE_SELECTORS).evaluateAll((elements) => {
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const input = document.querySelector('[aria-label="Chat input"]');
+    const form = document.querySelector("form#chat-input") || input?.closest("form") || null;
+
+    if (!form) {
+      return {
+        actions: [],
+        rootFound: false
+      };
+    }
+
+    const isVisibleInViewport = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0 &&
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < window.innerHeight &&
+        rect.left < window.innerWidth;
+    };
+
+    const formRect = form.getBoundingClientRect();
+    const isNearComposer = (element) => {
+      const rect = element.getBoundingClientRect();
+      const withinVerticalBand = rect.bottom >= formRect.top - 420 &&
+        rect.top <= formRect.bottom + 48;
+      const withinHorizontalBand = rect.right >= formRect.left - 96 &&
+        rect.left <= formRect.right + 96;
+      return withinVerticalBand && withinHorizontalBand;
+    };
+
+    const buildDescriptor = (element, domIndex) => {
+      const rect = element.getBoundingClientRect();
+      const text = normalize(element.textContent || "");
+      const ariaLabel = normalize(element.getAttribute("aria-label") || "");
+      const label = text || ariaLabel;
+
+      return {
+        domIndex,
+        label,
+        text,
+        ariaLabel,
+        tagName: element.tagName.toLowerCase(),
+        role: normalize(element.getAttribute("role") || ""),
+        disabled: element.matches("[disabled],[aria-disabled='true'],[data-disabled='true']"),
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      };
+    };
+
+    let root = form.parentElement || form;
+    for (let current = form.parentElement; current; current = current.parentElement) {
+      const currentRect = current.getBoundingClientRect();
+      if (currentRect.width > formRect.width + 220) {
+        continue;
+      }
+
+      const scopedActions = elements
+        .filter((element) => {
+          return current.contains(element) &&
+            !form.contains(element) &&
+            isVisibleInViewport(element) &&
+            isNearComposer(element);
+        })
+        .map((element, domIndex) => buildDescriptor(element, elements.indexOf(element)))
+        .filter((entry) => entry.label && entry.domIndex >= 0);
+
+      if (scopedActions.length > 0) {
+        root = current;
+        break;
+      }
+    }
+
+    const actions = elements
+      .map((element, domIndex) => ({
+        element,
+        descriptor: buildDescriptor(element, domIndex)
+      }))
+      .filter(({ element, descriptor }) => {
+        return root.contains(element) &&
+          !form.contains(element) &&
+          descriptor.label &&
+          isVisibleInViewport(element) &&
+          isNearComposer(element);
+      })
+      .map(({ descriptor }) => descriptor)
+      .sort((left, right) => {
+        if (left.y !== right.y) {
+          return left.y - right.y;
+        }
+        return left.x - right.x;
+      });
+
+    return {
+      actions,
+      rootFound: true
+    };
+  });
+}
+
+export async function listChatActions(page, {
+  timeoutMs = 5_000,
+  pollMs = 250
+} = {}) {
+  const composerVisible = await waitForChatComposer(page);
+  if (!composerVisible) {
+    throw new Error("Could not locate the Lovable chat composer on this page.");
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  let lastSnapshot = null;
+
+  while (Date.now() < deadline) {
+    const snapshot = await getVisibleChatActionSnapshot(page);
+    if (!snapshot.rootFound) {
+      throw new Error("Could not locate the Lovable chat composer on this page.");
+    }
+
+    lastSnapshot = snapshot;
+    if (snapshot.actions.length > 0) {
+      return snapshot.actions;
+    }
+
+    await page.waitForTimeout(pollMs);
+  }
+
+  return lastSnapshot?.actions || [];
+}
+
+export async function clickChatAction(page, {
+  label,
+  exact = false,
+  matchIndex = 0,
+  timeoutMs = 15_000,
+  settleMs = 1_500,
+  actionsTimeoutMs = 5_000,
+  actionsPollMs = 250
+}) {
+  const normalizedLabel = normalizeText(label).toLowerCase();
+  if (!normalizedLabel) {
+    throw new Error("Expected a non-empty chat action label.");
+  }
+
+  const deadline = Date.now() + actionsTimeoutMs;
+  let actions = [];
+  let matches = [];
+  let target = null;
+
+  while (Date.now() < deadline) {
+    actions = await listChatActions(page, {
+      timeoutMs: Math.max(actionsPollMs, 250),
+      pollMs: actionsPollMs
+    }).catch(() => []);
+
+    const exactMatches = actions.filter((action) => action.label.toLowerCase() === normalizedLabel);
+    const containsMatches = actions.filter((action) => action.label.toLowerCase().includes(normalizedLabel));
+    matches = exact ? exactMatches : (exactMatches.length > 0 ? exactMatches : containsMatches);
+
+    if (matchIndex >= 0 && matchIndex < matches.length) {
+      target = matches[matchIndex];
+      if (!target.disabled) {
+        break;
+      }
+    }
+
+    if (matches.length > 0 && matchIndex >= matches.length) {
+      break;
+    }
+
+    await page.waitForTimeout(actionsPollMs);
+  }
+
+  if (matches.length === 0) {
+    const visibleActions = actions.map((action) => action.label).join(", ") || "(none)";
+    throw new Error(`No visible chat action matched "${label}". Visible actions: ${visibleActions}`);
+  }
+
+  if (matchIndex < 0 || matchIndex >= matches.length) {
+    throw new Error(
+      `Match index ${matchIndex} is out of range for "${label}". Matching actions: ${matches.map((action) => action.label).join(", ")}`
+    );
+  }
+
+  target = matches[matchIndex];
+  if (target.disabled) {
+    throw new Error(`Chat action "${target.label}" is currently disabled.`);
+  }
+
+  const locator = page.locator(ACTIONABLE_SELECTORS).nth(target.domIndex);
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  try {
+    await locator.click({ timeout: timeoutMs });
+  } catch (error) {
+    try {
+      await locator.click({ timeout: Math.min(timeoutMs, 5_000), force: true });
+    } catch {
+      await locator.evaluate((element) => element.click());
+    }
+  }
+  await page.waitForTimeout(settleMs);
+
+  return {
+    clicked: target,
+    actionsAfterClick: await listChatActions(page, {
+      timeoutMs: actionsTimeoutMs,
+      pollMs: actionsPollMs
+    }).catch(() => [])
+  };
+}
+
+function normalizeRuntimeErrorActionLabel(value) {
+  return normalizeText(value).replace(/([a-z])([A-Z])$/, "$1");
+}
+
+async function getVisibleRuntimeErrorSnapshot(page) {
+  return page.locator(ACTIONABLE_SELECTORS).evaluateAll((elements, patterns) => {
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const normalizeActionLabel = (value) => normalize(value).replace(/([a-z])([A-Z])$/, "$1");
+    const isRendered = (element) => {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0;
+    };
+
+    const textElements = Array.from(document.querySelectorAll("p,div,span,h1,h2,h3,h4"))
+      .filter((element) => element instanceof HTMLElement && isRendered(element));
+
+    const errorMessage = textElements
+      .map((element) => ({
+        element,
+        text: normalize(element.textContent || "")
+      }))
+      .filter(({ text }) => new RegExp(patterns.message, "i").test(text))
+      .sort((left, right) => left.text.length - right.text.length)[0]?.element || null;
+
+    if (!(errorMessage instanceof HTMLElement)) {
+      return {
+        open: false,
+        title: null,
+        message: null,
+        actions: []
+      };
+    }
+
+    const buildDescriptor = (element, domIndex) => {
+      const rect = element.getBoundingClientRect();
+      const text = normalize(element.textContent || "");
+      const ariaLabel = normalize(element.getAttribute("aria-label") || "");
+      const rawLabel = text || ariaLabel;
+      const label = normalizeActionLabel(rawLabel);
+
+      return {
+        domIndex,
+        label,
+        rawLabel,
+        text,
+        ariaLabel,
+        tagName: element.tagName.toLowerCase(),
+        role: normalize(element.getAttribute("role") || ""),
+        disabled: element.matches("[disabled],[aria-disabled='true'],[data-disabled='true']"),
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      };
+    };
+
+    let root = errorMessage.parentElement || errorMessage;
+    for (let current = errorMessage.parentElement; current; current = current.parentElement) {
+      if (!(current instanceof HTMLElement) || !isRendered(current)) {
+        continue;
+      }
+
+      const text = normalize(current.textContent || "");
+      if (!new RegExp(patterns.message, "i").test(text)) {
+        continue;
+      }
+
+      const scopedActions = elements
+        .map((element, domIndex) => ({ element, descriptor: buildDescriptor(element, domIndex) }))
+        .filter(({ element, descriptor }) => {
+          return current.contains(element) &&
+            descriptor.label &&
+            isRendered(element) &&
+            new RegExp(patterns.action, "i").test(descriptor.label);
+        });
+
+      if (scopedActions.length > 0) {
+        root = current;
+        break;
+      }
+    }
+
+    const actions = elements
+      .map((element, domIndex) => ({ element, descriptor: buildDescriptor(element, domIndex) }))
+      .filter(({ element, descriptor }) => {
+        return root.contains(element) &&
+          descriptor.label &&
+          isRendered(element) &&
+          new RegExp(patterns.action, "i").test(descriptor.label);
+      })
+      .map(({ descriptor }) => descriptor)
+      .sort((left, right) => {
+        if (left.y !== right.y) {
+          return left.y - right.y;
+        }
+        return left.x - right.x;
+      });
+
+    const title = textElements
+      .map((element) => normalize(element.textContent || ""))
+      .filter((value) => new RegExp(patterns.title, "i").test(value))
+      .sort((left, right) => left.length - right.length)[0] || null;
+
+    return {
+      open: actions.length > 0,
+      title,
+      message: normalize(errorMessage.textContent || ""),
+      actions
+    };
+  }, {
+    title: RUNTIME_ERROR_TITLE_PATTERN.source,
+    message: RUNTIME_ERROR_MESSAGE_PATTERN.source,
+    action: RUNTIME_ERROR_ACTION_PATTERN.source
+  });
+}
+
+export async function getProjectRuntimeErrorState(page, {
+  timeoutMs = 5_000,
+  pollMs = 250
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let lastSnapshot = await getVisibleRuntimeErrorSnapshot(page);
+
+  while (Date.now() < deadline) {
+    if (lastSnapshot.open) {
+      return lastSnapshot;
+    }
+
+    await page.waitForTimeout(pollMs);
+    lastSnapshot = await getVisibleRuntimeErrorSnapshot(page);
+  }
+
+  return lastSnapshot;
+}
+
+export async function listRuntimeErrorActions(page, {
+  timeoutMs = 5_000,
+  pollMs = 250
+} = {}) {
+  const state = await getProjectRuntimeErrorState(page, {
+    timeoutMs,
+    pollMs
+  });
+
+  return state.actions || [];
+}
+
+export async function clickRuntimeErrorAction(page, {
+  label,
+  exact = false,
+  matchIndex = 0,
+  timeoutMs = 15_000,
+  settleMs = 1_500,
+  actionsTimeoutMs = 5_000,
+  actionsPollMs = 250
+}) {
+  const normalizedLabel = normalizeRuntimeErrorActionLabel(label).toLowerCase();
+  if (!normalizedLabel) {
+    throw new Error("Expected a non-empty runtime error action label.");
+  }
+
+  const deadline = Date.now() + actionsTimeoutMs;
+  let actions = [];
+  let matches = [];
+  let target = null;
+
+  while (Date.now() < deadline) {
+    actions = await listRuntimeErrorActions(page, {
+      timeoutMs: Math.max(actionsPollMs, 250),
+      pollMs: actionsPollMs
+    }).catch(() => []);
+
+    const exactMatches = actions.filter((action) => action.label.toLowerCase() === normalizedLabel);
+    const containsMatches = actions.filter((action) => action.label.toLowerCase().includes(normalizedLabel));
+    matches = exact ? exactMatches : (exactMatches.length > 0 ? exactMatches : containsMatches);
+
+    if (matchIndex >= 0 && matchIndex < matches.length) {
+      target = matches[matchIndex];
+      if (!target.disabled) {
+        break;
+      }
+    }
+
+    if (matches.length > 0 && matchIndex >= matches.length) {
+      break;
+    }
+
+    await page.waitForTimeout(actionsPollMs);
+  }
+
+  if (matches.length === 0) {
+    const visibleActions = actions.map((action) => action.label).join(", ") || "(none)";
+    throw new Error(`No visible runtime error action matched "${label}". Visible actions: ${visibleActions}`);
+  }
+
+  if (matchIndex < 0 || matchIndex >= matches.length) {
+    throw new Error(
+      `Match index ${matchIndex} is out of range for "${label}". Matching runtime error actions: ${matches.map((action) => action.label).join(", ")}`
+    );
+  }
+
+  target = matches[matchIndex];
+  if (target.disabled) {
+    throw new Error(`Runtime error action "${target.label}" is currently disabled.`);
+  }
+
+  const locator = page.locator(ACTIONABLE_SELECTORS).nth(target.domIndex);
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  try {
+    await locator.click({ timeout: timeoutMs });
+  } catch (error) {
+    try {
+      await locator.click({ timeout: Math.min(timeoutMs, 5_000), force: true });
+    } catch {
+      await locator.evaluate((element) => element.click());
+    }
+  }
+  await page.waitForTimeout(settleMs);
+
+  return {
+    clicked: target,
+    stateAfterClick: await getProjectRuntimeErrorState(page, {
+      timeoutMs: actionsTimeoutMs,
+      pollMs: actionsPollMs
+    }).catch(() => ({
+      open: false,
+      title: null,
+      message: null,
+      actions: []
+    }))
+  };
+}
+
+function buildFindingsLevelCounts(issues = []) {
+  const counts = {
+    errors: 0,
+    warnings: 0,
+    info: 0
+  };
+
+  for (const issue of issues) {
+    const normalizedLevel = normalizeText(issue?.level).toLowerCase();
+    if (normalizedLevel === "error") {
+      counts.errors += 1;
+    } else if (normalizedLevel === "warning") {
+      counts.warnings += 1;
+    } else if (normalizedLevel === "info") {
+      counts.info += 1;
+    }
+  }
+
+  return counts;
+}
+
+function parseFindingsCount(text, label) {
+  const match = String(text || "").match(new RegExp(`(\\d+)\\s+${escapeRegExp(label)}`, "i"));
+  if (!match) {
+    return null;
+  }
+
+  const count = Number.parseInt(match[1], 10);
+  return Number.isNaN(count) ? null : count;
+}
+
+async function readFindingsPaneState(page) {
+  const snapshot = await page.evaluate(({ statusPatternSource, statusExactPatternSource }) => {
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+
+    const isRendered = (element) => {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0;
+    };
+
+    const dedupe = (values) => Array.from(new Set(values.filter(Boolean)));
+    const main = document.querySelector("main");
+    if (!(main instanceof HTMLElement)) {
+      return {
+        open: false,
+        title: null,
+        scanTitle: null,
+        status: null,
+        summaryTitle: null,
+        availableActions: [],
+        advancedViewEnabled: null,
+        issues: [],
+        rootText: ""
+      };
+    }
+
+    const visibleElements = Array.from(main.querySelectorAll("*")).filter((element) => {
+      return element instanceof HTMLElement && isRendered(element);
+    });
+
+    const findVisibleByText = (pattern) => {
+      return visibleElements.find((element) => pattern.test(normalize(element.textContent || ""))) || null;
+    };
+
+    const scanHeading = findVisibleByText(/^Security scan$/i);
+    const issuesHeading = findVisibleByText(/^Detected issues$/i);
+
+    let root = null;
+    if (scanHeading instanceof HTMLElement && issuesHeading instanceof HTMLElement) {
+      for (let current = scanHeading.parentElement; current; current = current.parentElement) {
+        if (!(current instanceof HTMLElement) || !main.contains(current) || !isRendered(current)) {
+          continue;
+        }
+
+        const text = normalize(current.textContent || "");
+        if (
+          current.contains(issuesHeading) &&
+          /Security scan/i.test(text) &&
+          /Detected issues/i.test(text)
+        ) {
+          root = current;
+          break;
+        }
+      }
+    }
+
+    if (!(root instanceof HTMLElement)) {
+      return {
+        open: false,
+        title: null,
+        scanTitle: null,
+        status: null,
+        summaryTitle: null,
+        availableActions: [],
+        advancedViewEnabled: null,
+        issues: [],
+        rootText: ""
+      };
+    }
+
+    const statusPattern = new RegExp(statusPatternSource, "i");
+    const statusExactPattern = new RegExp(statusExactPatternSource, "i");
+    const rootText = normalize(root.innerText || root.textContent || "");
+    const rootVisibleElements = Array.from(root.querySelectorAll("*")).filter((element) => {
+      return element instanceof HTMLElement && isRendered(element);
+    });
+
+    const getExactText = (pattern) => {
+      return rootVisibleElements
+        .map((element) => normalize(element.textContent || ""))
+        .find((value) => pattern.test(value)) || null;
+    };
+
+    const title = dedupe(
+      Array.from(main.querySelectorAll("h1,h2,h3,h4,p,span,div"))
+        .filter((element) => element instanceof HTMLElement && isRendered(element))
+        .map((element) => normalize(element.textContent || ""))
+        .filter((value) => /^Security$/i.test(value))
+    )[0] || "Security";
+
+    const statusTexts = dedupe(rootVisibleElements.map((element) => normalize(element.textContent || "")));
+    const status = statusTexts.find((value) => statusExactPattern.test(value)) ||
+      statusTexts.find((value) => statusPattern.test(value) && value.length <= 80) ||
+      null;
+
+    const actionElements = Array.from(root.querySelectorAll("button,[role='button'],a,label")).filter((element) => {
+      return element instanceof HTMLElement && isRendered(element);
+    });
+    const actionLabels = dedupe(actionElements.map((element) => {
+      return normalize(element.textContent || element.getAttribute("aria-label") || "");
+    }));
+    const filters = actionLabels.filter((label) => /^(\d+\s+(Errors?|Warnings?|Info)|All)$/i.test(label));
+    const issueActions = actionLabels.filter((label) => /^Open finding link$/i.test(label));
+    const availableActions = actionLabels.filter((label) => {
+      return !filters.includes(label) && !issueActions.includes(label);
+    });
+
+    const advancedControl = actionElements.find((element) => {
+      const text = normalize(element.textContent || element.getAttribute("aria-label") || "");
+      return /Advanced view/i.test(text);
+    }) || null;
+
+    let advancedViewEnabled = null;
+    if (advancedControl instanceof HTMLElement) {
+      const stateElement = advancedControl.matches("input,[role='switch'],[role='checkbox'],button")
+        ? advancedControl
+        : advancedControl.querySelector("input,[role='switch'],[role='checkbox'],button[aria-pressed],button");
+
+      if (stateElement instanceof HTMLElement) {
+        const ariaChecked = stateElement.getAttribute("aria-checked");
+        const ariaPressed = stateElement.getAttribute("aria-pressed");
+        const dataState = stateElement.getAttribute("data-state");
+        const checked = "checked" in stateElement ? Boolean(stateElement.checked) : null;
+
+        if (
+          ariaChecked === "true" ||
+          ariaPressed === "true" ||
+          dataState === "checked" ||
+          dataState === "on" ||
+          checked === true
+        ) {
+          advancedViewEnabled = true;
+        } else if (
+          ariaChecked === "false" ||
+          ariaPressed === "false" ||
+          dataState === "unchecked" ||
+          dataState === "off" ||
+          checked === false
+        ) {
+          advancedViewEnabled = false;
+        }
+      }
+    }
+
+    const issues = Array.from(root.querySelectorAll("table tbody tr"))
+      .filter((row) => row instanceof HTMLElement && isRendered(row))
+      .map((row) => {
+        const cells = Array.from(row.querySelectorAll("th,td"))
+          .map((cell) => normalize(cell.textContent || ""))
+          .filter(Boolean);
+        return {
+          level: cells[0] || "",
+          issue: cells.slice(1).join(" ") || cells[0] || ""
+        };
+      })
+      .filter((entry) => entry.level || entry.issue);
+
+    return {
+      open: true,
+      title,
+      scanTitle: getExactText(/^Security scan$/i),
+      status,
+      summaryTitle: getExactText(/^Detected issues$/i),
+      availableActions,
+      availableFilters: filters,
+      issueActions,
+      advancedViewEnabled,
+      issues,
+      rootText
+    };
+  }, {
+    statusPatternSource: FINDINGS_STATUS_PATTERN.source,
+    statusExactPatternSource: FINDINGS_STATUS_EXACT_PATTERN.source
+  });
+
+  if (!snapshot.open) {
+    return snapshot;
+  }
+
+  const countsFromIssues = buildFindingsLevelCounts(snapshot.issues);
+  const counts = {
+    errors: parseFindingsCount(snapshot.rootText, "Errors?") ?? countsFromIssues.errors,
+    warnings: parseFindingsCount(snapshot.rootText, "Warnings?") ?? countsFromIssues.warnings,
+    info: parseFindingsCount(snapshot.rootText, "Info") ?? countsFromIssues.info
+  };
+
+  return {
+    ...snapshot,
+    counts,
+    issueCount: snapshot.issues.length
+  };
+}
+
+async function waitForFindingsPane(page, {
+  timeoutMs = 15_000,
+  pollMs = 250
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let lastState = await readFindingsPaneState(page);
+
+  while (Date.now() < deadline) {
+    if (lastState.open) {
+      return lastState;
+    }
+
+    await page.waitForTimeout(pollMs);
+    lastState = await readFindingsPaneState(page);
+  }
+
+  return lastState;
+}
+
+export async function openFindingsPane(page, {
+  timeoutMs = 15_000,
+  pollMs = 250,
+  settleMs = 1_500,
+  actionsTimeoutMs = 5_000,
+  actionsPollMs = 250
+} = {}) {
+  const existingState = await readFindingsPaneState(page);
+  if (existingState.open) {
+    return {
+      opened: false,
+      state: existingState,
+      clickedAction: null,
+      actionsAfterClick: await listChatActions(page, {
+        timeoutMs: actionsTimeoutMs,
+        pollMs: actionsPollMs
+      }).catch(() => [])
+    };
+  }
+
+  const clickResult = await clickChatAction(page, {
+    label: FINDINGS_ACTION_LABEL,
+    exact: true,
+    timeoutMs: Math.max(timeoutMs, 15_000),
+    settleMs,
+    actionsTimeoutMs: Math.max(actionsTimeoutMs, timeoutMs),
+    actionsPollMs
+  });
+
+  const state = await waitForFindingsPane(page, {
+    timeoutMs,
+    pollMs
+  });
+
+  if (!state.open) {
+    throw new Error("Lovable did not open the Security findings pane after clicking View findings.");
+  }
+
+  return {
+    opened: true,
+    state,
+    clickedAction: clickResult.clicked,
+    actionsAfterClick: clickResult.actionsAfterClick
+  };
+}
+
+export async function getProjectFindingsState(page, {
+  openIfNeeded = true,
+  timeoutMs = 15_000,
+  pollMs = 250,
+  settleMs = 1_500,
+  actionsTimeoutMs = 5_000,
+  actionsPollMs = 250
+} = {}) {
+  const chatActionsBefore = await listChatActions(page, {
+    timeoutMs: actionsTimeoutMs,
+    pollMs: actionsPollMs
+  }).catch(() => []);
+
+  let state = await readFindingsPaneState(page);
+  let openResult = null;
+
+  if (!state.open && openIfNeeded) {
+    openResult = await openFindingsPane(page, {
+      timeoutMs,
+      pollMs,
+      settleMs,
+      actionsTimeoutMs,
+      actionsPollMs
+    });
+    state = openResult.state;
+  }
+
+  const chatActionsAfter = await listChatActions(page, {
+    timeoutMs: actionsTimeoutMs,
+    pollMs: actionsPollMs
+  }).catch(() => chatActionsBefore);
+
+  return {
+    ...state,
+    openedViaAction: Boolean(openResult?.opened),
+    clickedAction: openResult?.clickedAction || null,
+    chatActionsBefore,
+    chatActionsAfter
+  };
+}
+
 export async function ensureSignedIn(page, {
   timeoutMs = 15_000
 } = {}) {
@@ -291,6 +1114,10 @@ function capitalize(value) {
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 function safeJsonParse(value) {

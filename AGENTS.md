@@ -64,6 +64,12 @@ npm run start -- login
 npm run start -- create "Build a simple landing page"
 npm run start -- prompt "https://lovable.dev/projects/..." "Add a hero CTA"
 npm run start -- mode "https://lovable.dev/projects/..." plan
+npm run start -- actions "https://lovable.dev/projects/..."
+npm run start -- action "https://lovable.dev/projects/..." "Approve"
+npm run start -- errors "https://lovable.dev/projects/..."
+npm run start -- error-action "https://lovable.dev/projects/..." "Try to fix"
+npm run start -- findings "https://lovable.dev/projects/..."
+npm run start -- chat-loop "https://lovable.dev/projects/..." "Outline the next changes" --mode plan --action "Approve"
 npm run start -- verify "https://lovable.dev/projects/..."
 npm run start -- publish "https://lovable.dev/projects/..."
 npm run start -- publish-settings "https://lovable.dev/projects/..."
@@ -103,13 +109,25 @@ For prompt regression checks:
 
 1. Use `mode` to set `build` or `plan`
 2. Use `prompt`
-3. Use `prompt --verify`
+3. If Lovable shows button-based next steps, use `actions` and `action`
+4. Use `prompt --verify`
+
+For a single end-to-end proposal run:
+
+1. Use `chat-loop "<project-url>" "<prompt>" --mode plan --action "Approve"`
+2. Add `--verify` if the resulting preview should be captured immediately after the loop
 
 ## What Currently Works
 
 - project creation through build URLs
 - prompt submission with server-side accept checks
 - `build` and `plan` composer mode switching
+- listing visible chat-side proposal actions near the composer
+- clicking button-driven follow-ups such as `Approve`, `Skip`, or similar Lovable proposal actions
+- reading Lovable's separate runtime/build error surface with `Try to fix` / `Show logs`
+- clicking runtime/build error actions and confirming server-side acceptance for `Try to fix`
+- extracting the inline `View findings` security pane, including scan status, counts, pane actions, and issue rows
+- single-command prompt -> proposal -> action flows through `chat-loop`
 - preview verification with screenshots, console checks, text assertions, and layout heuristics
 - publish to the default `.lovable.app` URL
 - redeploy already-published projects through the `Update` button when Lovable shows pending changes
