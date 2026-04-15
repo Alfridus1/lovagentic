@@ -17,27 +17,38 @@ import {
   answerProjectQuestion,
   capturePreviewSnapshot,
   clickChatAction,
+  connectProjectDomain,
+  connectProjectGitProvider,
   clickQuestionAction,
   clickRuntimeErrorAction,
+  disconnectProjectGitProvider,
   ensureSignedIn,
   fillPrompt,
   getDashboardState,
   getCurrentPromptMode,
+  getProjectGitState,
   getProjectFindingsState,
   getProjectDomainSettingsState,
+  getProjectKnowledgeState,
   getProjectQuestionState,
   getProjectRuntimeErrorState,
+  getProjectSettingsState,
+  getProjectToolbarState,
   getPublishedSettingsState,
   hasLovableSession,
   getProjectPreviewInfo,
+  getWorkspaceSettingsState,
   launchLovableContext,
   listChatActions,
   publishProject,
   readFirebaseAuthUsers,
+  reconnectProjectGitProvider,
   runCreateFlow,
   setPromptMode,
   submitPrompt,
   confirmPromptPersistsAfterReload,
+  updateProjectKnowledge,
+  updateProjectSettings,
   updateProjectSubdomain,
   updatePublishedSettings,
   waitForChatAcceptance,
@@ -1420,69 +1431,395 @@ program
   .option("--live-url-timeout-ms <ms>", "How long to wait for the updated live URL to return success", parseInteger, 300_000)
   .option("--poll-ms <ms>", "Polling interval while waiting for the updated live URL", parseInteger, 3000)
   .option("--subdomain <slug>", "Update the default .lovable.app subdomain")
+  .option("--connect <fqdn>", "Connect a custom domain like example.com or www.example.com")
+  .option("--advanced", "Open the advanced section in the custom-domain dialog before submitting", false)
+  .option("--json", "Print machine-readable JSON", false)
   .action(async (targetUrl, options) => {
-    const profileDir = getProfileDir(options.profileDir);
-    if (options.seedDesktopSession) {
-      await seedDesktopProfileIntoPlaywrightDefault({
-        fromDir: getDesktopProfileDir(options.desktopProfileDir),
-        toDir: profileDir,
-        force: true
-      });
-    }
-
-    const context = await launchLovableContext({
-      profileDir,
-      headless: Boolean(options.headless)
-    });
-
-    try {
-      const page = context.pages()[0] || await context.newPage();
-      const normalizedUrl = normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL);
-      await page.goto(normalizedUrl, { waitUntil: "domcontentloaded" });
-
-      const hasSession = await hasLovableSession(page);
-      if (!hasSession) {
-        throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
-        );
-      }
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
+      let subdomainResult = null;
+      let connectResult = null;
+      let state = null;
 
       if (options.subdomain) {
-        const result = await updateProjectSubdomain(page, {
+        subdomainResult = await updateProjectSubdomain(page, {
           projectUrl: normalizedUrl,
           subdomain: options.subdomain,
           timeoutMs: options.timeoutMs,
           liveUrlTimeoutMs: options.liveUrlTimeoutMs,
           pollMs: options.pollMs
         });
+        state = subdomainResult.finalState;
+      }
 
-        if (result.changed) {
-          console.log(`Updated project subdomain to ${result.finalState.subdomain}.`);
-        } else {
-          console.log(`Project already uses the ${result.finalState.subdomain} subdomain.`);
-        }
+      if (options.connect) {
+        connectResult = await connectProjectDomain(page, {
+          projectUrl: normalizedUrl,
+          domain: options.connect,
+          advanced: Boolean(options.advanced),
+          timeoutMs: options.timeoutMs
+        });
+        state = connectResult.finalState;
+      }
 
-        if (result.liveUrl) {
-          console.log(`Live URL: ${result.liveUrl}`);
-        }
-
-        if (result.liveCheck?.status) {
-          console.log(`Live URL status: ${result.liveCheck.status}`);
-        } else if (result.liveCheck?.error) {
-          console.log(`Live URL probe error: ${result.liveCheck.error}`);
-        }
-
-        printDomainSettingsState(result.finalState);
-      } else {
-        const state = await getProjectDomainSettingsState(page, {
+      if (!state) {
+        state = await getProjectDomainSettingsState(page, {
           projectUrl: normalizedUrl,
           timeoutMs: options.timeoutMs
         });
-        printDomainSettingsState(state);
       }
-    } finally {
-      await context.close();
-    }
+
+      const payload = {
+        state,
+        subdomainResult,
+        connectResult
+      };
+
+      if (options.json) {
+        console.log(JSON.stringify(payload, null, 2));
+        return;
+      }
+
+      if (subdomainResult) {
+        if (subdomainResult.changed) {
+          console.log(`Updated project subdomain to ${subdomainResult.finalState.subdomain}.`);
+        } else {
+          console.log(`Project already uses the ${subdomainResult.finalState.subdomain} subdomain.`);
+        }
+
+        if (subdomainResult.liveUrl) {
+          console.log(`Live URL: ${subdomainResult.liveUrl}`);
+        }
+
+        if (subdomainResult.liveCheck?.status) {
+          console.log(`Live URL status: ${subdomainResult.liveCheck.status}`);
+        } else if (subdomainResult.liveCheck?.error) {
+          console.log(`Live URL probe error: ${subdomainResult.liveCheck.error}`);
+        }
+      }
+
+      if (connectResult) {
+        console.log(
+          connectResult.changed
+            ? `Connected custom domain: ${options.connect}`
+            : `Custom domain already connected: ${options.connect}`
+        );
+      }
+
+      printDomainSettingsState(state);
+    });
+  });
+
+program
+  .command("toolbar")
+  .description("Inspect visible project toolbar buttons and optionally open their menus.")
+  .argument("<target-url>", "Lovable project URL")
+  .option("--profile-dir <path>", "Override the CLI browser profile path")
+  .option("--seed-desktop-session", "Refresh the Playwright profile from the desktop app before launch", false)
+  .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
+  .option("--headless", "Run headlessly instead of opening a visible browser", false)
+  .option("--menu <label>", "Open a specific toolbar menu button by visible label", collectValues, [])
+  .option("--timeout-ms <ms>", "How long to wait for toolbar menus and buttons", parseInteger, 20_000)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
+      const state = await getProjectToolbarState(page, {
+        projectUrl: normalizedUrl,
+        menus: options.menu,
+        timeoutMs: options.timeoutMs
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(state, null, 2));
+        return;
+      }
+
+      printToolbarState(state);
+    });
+  });
+
+addProjectSessionOptions(
+  program
+    .command("project-settings")
+    .description("Inspect or update low-risk project settings like visibility, category, badge visibility, analytics, and rename.")
+    .argument("<target-url>", "Lovable project URL")
+)
+  .option("--timeout-ms <ms>", "How long to wait for the project settings page", parseInteger, 90_000)
+  .option("--visibility <scope>", "Set project visibility (public, workspace, restricted-business)")
+  .option("--category <name>", "Set project category")
+  .option("--hide-lovable-badge <state>", "Set Hide Lovable badge to true/false")
+  .option("--disable-analytics <state>", "Set Disable analytics to true/false")
+  .option("--rename <name>", "Rename the project")
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
+      const requestedHideBadge = options.hideLovableBadge === undefined
+        ? undefined
+        : parseBooleanish(options.hideLovableBadge, "--hide-lovable-badge");
+      const requestedDisableAnalytics = options.disableAnalytics === undefined
+        ? undefined
+        : parseBooleanish(options.disableAnalytics, "--disable-analytics");
+
+      const hasRequestedChanges = options.visibility !== undefined ||
+        options.category !== undefined ||
+        requestedHideBadge !== undefined ||
+        requestedDisableAnalytics !== undefined ||
+        options.rename !== undefined;
+
+      const result = hasRequestedChanges
+        ? await updateProjectSettings(page, {
+          projectUrl: normalizedUrl,
+          visibility: options.visibility,
+          category: options.category,
+          hideLovableBadge: requestedHideBadge,
+          disableAnalytics: requestedDisableAnalytics,
+          rename: options.rename,
+          timeoutMs: options.timeoutMs
+        })
+        : {
+          changes: [],
+          state: await getProjectSettingsState(page, {
+            projectUrl: normalizedUrl,
+            timeoutMs: options.timeoutMs
+          })
+        };
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      if (result.changes.length > 0) {
+        console.log(`Updated project settings: ${result.changes.join(", ")}`);
+      } else {
+        console.log("No project setting changes requested.");
+      }
+
+      printProjectSettingsState(result.state);
+    });
+  });
+
+addProjectSessionOptions(
+  program
+    .command("knowledge")
+    .description("Inspect or update project and workspace knowledge.")
+    .argument("<target-url>", "Lovable project URL")
+)
+  .option("--timeout-ms <ms>", "How long to wait for the knowledge settings page", parseInteger, 90_000)
+  .option("--project-text <text>", "Set the project knowledge text")
+  .option("--workspace-text <text>", "Set the workspace knowledge text")
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
+      const hasRequestedChanges = options.projectText !== undefined || options.workspaceText !== undefined;
+      const result = hasRequestedChanges
+        ? await updateProjectKnowledge(page, {
+          projectUrl: normalizedUrl,
+          projectText: options.projectText,
+          workspaceText: options.workspaceText,
+          timeoutMs: options.timeoutMs
+        })
+        : {
+          changes: [],
+          state: await getProjectKnowledgeState(page, {
+            projectUrl: normalizedUrl,
+            timeoutMs: options.timeoutMs
+          })
+        };
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      if (result.changes.length > 0) {
+        console.log(`Updated knowledge: ${result.changes.join(", ")}`);
+      } else {
+        console.log("No knowledge changes requested.");
+      }
+
+      printKnowledgeState(result.state);
+    });
+  });
+
+addProjectSessionOptions(
+  program
+    .command("workspace")
+    .description("Inspect workspace and account settings surfaces without mutating them.")
+    .argument("<target-url>", "Lovable project URL")
+)
+  .option("--section <name>", "Workspace settings section to inspect", "all")
+  .option("--timeout-ms <ms>", "How long to wait for each workspace settings page", parseInteger, 90_000)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
+      const state = await getWorkspaceSettingsState(page, {
+        projectUrl: normalizedUrl,
+        section: options.section,
+        timeoutMs: options.timeoutMs
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(state, null, 2));
+        return;
+      }
+
+      printWorkspaceState(state);
+    });
+  });
+
+addProjectSessionOptions(
+  program
+    .command("git")
+    .description("Inspect or manage the project's Git/GitHub connection.")
+    .argument("<target-url>", "Lovable project URL")
+)
+  .option("--provider <name>", "Git provider to inspect", "github")
+  .option("--timeout-ms <ms>", "How long to wait for the git settings flow", parseInteger, 90_000)
+  .option("--connect", "Connect the provider for this project", false)
+  .option("--disconnect", "Disconnect the provider for this project", false)
+  .option("--reconnect", "Reconnect the provider for this project", false)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl, headless }) => {
+      const actionFlags = [options.connect, options.disconnect, options.reconnect].filter(Boolean).length;
+      if (actionFlags > 1) {
+        throw new Error("Choose only one git action at a time: --connect, --disconnect, or --reconnect.");
+      }
+
+      let result = null;
+      if (options.connect) {
+        result = await connectProjectGitProvider(page, {
+          projectUrl: normalizedUrl,
+          provider: options.provider,
+          timeoutMs: options.timeoutMs,
+          headless
+        });
+      } else if (options.disconnect) {
+        result = await disconnectProjectGitProvider(page, {
+          projectUrl: normalizedUrl,
+          provider: options.provider,
+          timeoutMs: options.timeoutMs
+        });
+      } else if (options.reconnect) {
+        result = await reconnectProjectGitProvider(page, {
+          projectUrl: normalizedUrl,
+          provider: options.provider,
+          timeoutMs: options.timeoutMs,
+          headless
+        });
+      } else {
+        result = {
+          changed: false,
+          state: await getProjectGitState(page, {
+            projectUrl: normalizedUrl,
+            provider: options.provider,
+            timeoutMs: options.timeoutMs
+          })
+        };
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      if (options.connect) {
+        console.log(result.changed ? "Connected the git provider." : "Git provider was already connected.");
+      } else if (options.disconnect) {
+        console.log(result.changed ? "Disconnected the git provider." : "Git provider was already disconnected.");
+      } else if (options.reconnect) {
+        console.log("Reconnected the git provider.");
+      }
+
+      printGitState(result.state);
+    });
+  });
+
+addProjectSessionOptions(
+  program
+    .command("code")
+    .description("Read the connected GitHub repository as a pragmatic Code-surface fallback.")
+    .argument("<target-url>", "Lovable project URL")
+)
+  .option("--provider <name>", "Git provider to inspect before reading code", "github")
+  .option("--file <path>", "Read a specific file from the connected repository")
+  .option("--search <query>", "Search code in the connected repository")
+  .option("--download", "Write the requested file content to disk; requires --file", false)
+  .option("--output-path <path>", "Where to write the downloaded file content")
+  .option("--limit <n>", "Limit tree or search output", parseInteger, 200)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
+      const gitState = await getProjectGitState(page, {
+        projectUrl: normalizedUrl,
+        provider: options.provider,
+        timeoutMs: 60_000
+      });
+
+      if (!gitState.connected || !gitState.repository) {
+        throw new Error("Code inspection requires a connected GitHub repository in Lovable.");
+      }
+
+      if (String(options.provider || "github").trim().toLowerCase() !== "github") {
+        throw new Error("The current code reader only supports GitHub-connected projects.");
+      }
+
+      const state = await buildCodeStateFromGitConnection({
+        gitState,
+        filePath: options.file,
+        searchQuery: options.search,
+        limit: options.limit,
+        download: Boolean(options.download),
+        outputPath: options.outputPath
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(state, null, 2));
+        return;
+      }
+
+      printCodeState(state);
+    });
+  });
+
+addProjectSessionOptions(
+  program
+    .command("speed")
+    .description("Run Lighthouse against the current project preview as a pragmatic Speed-surface fallback.")
+    .argument("<target-url>", "Lovable project URL")
+)
+  .option("--device <name>", "Audit desktop, mobile, or both", "both")
+  .option("--output-dir <path>", "Directory for Lighthouse JSON reports")
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
+      const previewInfo = await getProjectPreviewInfo(page);
+      const devices = getSpeedDevices(options.device);
+      const outputDir = resolveSpeedOutputDir(normalizedUrl, options.outputDir);
+      await fs.mkdir(outputDir, { recursive: true });
+
+      const audits = [];
+      for (const device of devices) {
+        audits.push(await runLighthouseAudit(previewInfo.src, {
+          device,
+          outputDir
+        }));
+      }
+
+      const state = {
+        projectUrl: normalizedUrl,
+        source: "lighthouse-preview",
+        previewUrl: redactPreviewUrl(previewInfo.src),
+        audits
+      };
+
+      if (options.json) {
+        console.log(JSON.stringify(state, null, 2));
+        return;
+      }
+
+      printSpeedState(state);
+    });
   });
 
 program
@@ -1556,6 +1893,53 @@ program.parseAsync(process.argv).catch((error) => {
   process.exitCode = 1;
 });
 
+function addProjectSessionOptions(command) {
+  return command
+    .option("--profile-dir <path>", "Override the CLI browser profile path")
+    .option("--seed-desktop-session", "Refresh the Playwright profile from the desktop app before launch", false)
+    .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
+    .option("--headless", "Run headlessly instead of opening a visible browser", false);
+}
+
+async function withProjectPageSession(targetUrl, options, callback) {
+  const profileDir = getProfileDir(options.profileDir);
+  if (options.seedDesktopSession) {
+    await seedDesktopProfileIntoPlaywrightDefault({
+      fromDir: getDesktopProfileDir(options.desktopProfileDir),
+      toDir: profileDir,
+      force: true
+    });
+  }
+
+  const context = await launchLovableContext({
+    profileDir,
+    headless: Boolean(options.headless)
+  });
+
+  try {
+    const page = context.pages()[0] || await context.newPage();
+    const normalizedUrl = normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL);
+    await page.goto(normalizedUrl, { waitUntil: "domcontentloaded" });
+
+    const hasSession = await hasLovableSession(page);
+    if (!hasSession) {
+      throw new Error(
+        `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+      );
+    }
+
+    return await callback({
+      context,
+      page,
+      normalizedUrl,
+      profileDir,
+      headless: Boolean(options.headless)
+    });
+  } finally {
+    await context.close();
+  }
+}
+
 function collectValues(value, previous) {
   previous.push(value);
   return previous;
@@ -1614,6 +1998,19 @@ function assertPromptLooksComplete(prompt, {
   return warnings;
 }
 
+function parseBooleanish(value, flagName) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["true", "1", "yes", "y", "on"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "n", "off"].includes(normalized)) {
+    return false;
+  }
+
+  throw new Error(`${flagName} expects one of: true, false, yes, no, on, off.`);
+}
+
 function getVerifyVariants({
   desktopOnly = false,
   mobileOnly = false
@@ -1631,6 +2028,241 @@ function getVerifyVariants({
   }
 
   return ["desktop", "mobile"];
+}
+
+function getSpeedDevices(value = "both") {
+  const normalized = String(value || "both").trim().toLowerCase();
+  if (normalized === "desktop") {
+    return ["desktop"];
+  }
+
+  if (normalized === "mobile") {
+    return ["mobile"];
+  }
+
+  if (normalized === "both") {
+    return ["desktop", "mobile"];
+  }
+
+  throw new Error('Speed device must be one of: desktop, mobile, both.');
+}
+
+async function runCommandCapture(command, args, {
+  cwd = process.cwd()
+} = {}) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve({
+          stdout,
+          stderr
+        });
+        return;
+      }
+
+      const error = new Error(
+        `${command} ${args.join(" ")} failed with exit code ${code}.${stderr ? ` ${stderr.trim()}` : ""}`
+      );
+      error.stdout = stdout;
+      error.stderr = stderr;
+      reject(error);
+    });
+  });
+}
+
+async function runGhApiJson(route) {
+  const result = await runCommandCapture("gh", [
+    "api",
+    "-H",
+    "Accept: application/vnd.github+json",
+    route
+  ]);
+
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`gh api returned non-JSON output for "${route}": ${error.message}`);
+  }
+}
+
+function encodeGitHubPath(filePath) {
+  return String(filePath || "")
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function decodeGitHubContent(payload) {
+  if (!payload?.content) {
+    return "";
+  }
+
+  return Buffer.from(String(payload.content).replace(/\n/g, ""), "base64").toString("utf8");
+}
+
+async function buildCodeStateFromGitConnection({
+  gitState,
+  filePath,
+  searchQuery,
+  limit = 200,
+  download = false,
+  outputPath
+}) {
+  const repository = gitState.repository;
+  let branch = gitState.branch || null;
+  if (!branch) {
+    const repoPayload = await runGhApiJson(`repos/${repository}`);
+    branch = repoPayload.default_branch || "main";
+  }
+  const state = {
+    source: "github",
+    repository,
+    branch,
+    tree: null,
+    file: null,
+    search: null,
+    downloadPath: null
+  };
+
+  if (filePath) {
+    const payload = await runGhApiJson(
+      `repos/${repository}/contents/${encodeGitHubPath(filePath)}?ref=${encodeURIComponent(branch)}`
+    );
+
+    if (Array.isArray(payload)) {
+      state.file = {
+        path: filePath,
+        type: "directory",
+        entries: payload.slice(0, limit).map((entry) => ({
+          name: entry.name,
+          path: entry.path,
+          type: entry.type,
+          size: entry.size ?? null
+        })),
+        totalEntries: payload.length
+      };
+    } else {
+      state.file = {
+        path: payload.path || filePath,
+        type: payload.type || "file",
+        size: payload.size ?? null,
+        content: decodeGitHubContent(payload)
+      };
+
+      if (download) {
+        const resolvedOutputPath = path.resolve(outputPath || path.basename(filePath));
+        await fs.mkdir(path.dirname(resolvedOutputPath), { recursive: true });
+        await fs.writeFile(resolvedOutputPath, state.file.content);
+        state.downloadPath = resolvedOutputPath;
+      }
+    }
+  }
+
+  if (searchQuery) {
+    const payload = await runGhApiJson(
+      `search/code?q=${encodeURIComponent(`${searchQuery} repo:${repository}`)}&per_page=${Math.min(limit, 100)}`
+    );
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    state.search = {
+      query: searchQuery,
+      totalCount: payload.total_count ?? items.length,
+      items: items.slice(0, limit).map((item) => ({
+        name: item.name,
+        path: item.path,
+        repository: item.repository?.full_name || repository,
+        sha: item.sha
+      }))
+    };
+  }
+
+  if (!filePath && !searchQuery) {
+    const payload = await runGhApiJson(
+      `repos/${repository}/git/trees/${encodeURIComponent(branch)}?recursive=1`
+    );
+    const entries = Array.isArray(payload.tree) ? payload.tree : [];
+    state.tree = {
+      totalEntries: entries.length,
+      entries: entries
+        .filter((entry) => entry?.path)
+        .slice(0, limit)
+        .map((entry) => ({
+          path: entry.path,
+          type: entry.type,
+          size: entry.size ?? null
+        }))
+    };
+  }
+
+  if (download && !filePath) {
+    throw new Error("--download requires --file.");
+  }
+
+  return state;
+}
+
+async function runLighthouseAudit(url, {
+  device,
+  outputDir
+}) {
+  const reportPath = path.resolve(outputDir, `${device}.lighthouse.json`);
+  const args = [
+    "--yes",
+    "lighthouse",
+    url,
+    "--quiet",
+    "--output=json",
+    `--output-path=${reportPath}`,
+    "--chrome-flags=--headless=new --no-sandbox --disable-gpu"
+  ];
+
+  if (device === "desktop") {
+    args.push("--preset=desktop");
+  }
+
+  await runCommandCapture("npx", args);
+  const rawReport = await fs.readFile(reportPath, "utf8");
+  const report = JSON.parse(rawReport);
+  const categories = report.categories || {};
+
+  return {
+    device,
+    reportPath,
+    finalUrl: report.finalUrl,
+    fetchTime: report.fetchTime,
+    scores: {
+      performance: categories.performance?.score === null || categories.performance?.score === undefined
+        ? null
+        : Math.round(categories.performance.score * 100),
+      accessibility: categories.accessibility?.score === null || categories.accessibility?.score === undefined
+        ? null
+        : Math.round(categories.accessibility.score * 100),
+      bestPractices: categories["best-practices"]?.score === null || categories["best-practices"]?.score === undefined
+        ? null
+        : Math.round(categories["best-practices"].score * 100),
+      seo: categories.seo?.score === null || categories.seo?.score === undefined
+        ? null
+        : Math.round(categories.seo.score * 100)
+    }
+  };
 }
 
 function printPublishedSettingsState(state) {
@@ -1651,6 +2283,140 @@ function printPublishedSettingsState(state) {
   console.log(`Website title placeholder: ${state.websiteInfo?.titlePlaceholder || "(none)"}`);
   console.log(`Website description: ${state.websiteInfo?.description || "(empty)"}`);
   console.log(`Website description placeholder: ${state.websiteInfo?.descriptionPlaceholder || "(none)"}`);
+}
+
+function printToolbarState(state) {
+  console.log(`Toolbar project: ${state.projectUrl}`);
+  console.log(`Buttons: ${state.buttons.length}`);
+  state.buttons.forEach((button, index) => {
+    console.log(`[${index}] ${button.label}${button.menuCandidate ? " [menu]" : ""}${button.disabled ? " (disabled)" : ""}`);
+  });
+
+  if (!state.openedMenus?.length) {
+    return;
+  }
+
+  state.openedMenus.forEach((entry, index) => {
+    console.log(`Menu ${index + 1}: ${entry.button.label}`);
+    if (!entry.opened || !entry.surface) {
+      console.log("  did not open a visible surface");
+      return;
+    }
+
+    console.log(`  actions: ${entry.surface.buttons.join(", ") || "(none)"}`);
+    if (entry.surface.links.length > 0) {
+      console.log(`  links: ${entry.surface.links.map((link) => link.text || link.href).join(", ")}`);
+    }
+  });
+}
+
+function printProjectSettingsState(state) {
+  console.log(`Project settings: ${state.settingsUrl}`);
+  console.log(`Project name: ${state.projectName || "(unknown)"}`);
+  console.log(`Owner: ${state.owner || "(unknown)"}`);
+  console.log(`Tech stack: ${state.techStack || "(unknown)"}`);
+  console.log(`Project visibility: ${state.visibility.current || "(unknown)"}`);
+  console.log(`Visibility options: ${state.visibility.options?.map((option) => option.label).join(", ") || "(none)"}`);
+  console.log(`Project category: ${state.category.current || "(unknown)"}`);
+  console.log(`Category options: ${state.category.options?.map((option) => option.label).join(", ") || "(none)"}`);
+  console.log(`Hide Lovable badge: ${state.hideLovableBadge.checked === null ? "unknown" : state.hideLovableBadge.checked ? "on" : "off"}`);
+  console.log(`Disable analytics: ${state.disableAnalytics.checked === null ? "unknown" : state.disableAnalytics.checked ? "on" : "off"}`);
+  console.log(`Cross-project sharing: ${state.crossProjectSharing.checked === null ? "unknown" : state.crossProjectSharing.checked ? "on" : "off"}`);
+  console.log(`Available actions: ${state.availableActions.join(", ") || "(none)"}`);
+}
+
+function printKnowledgeState(state) {
+  console.log(`Knowledge settings: ${state.settingsUrl}`);
+  console.log(`Project knowledge length: ${state.projectKnowledge.length}`);
+  console.log(`Workspace knowledge length: ${state.workspaceKnowledge.length}`);
+  console.log(`Project placeholder: ${state.projectPlaceholder || "(none)"}`);
+  console.log(`Workspace placeholder: ${state.workspacePlaceholder || "(none)"}`);
+}
+
+function printWorkspaceSectionState(state) {
+  console.log(`[${state.section}] ${state.title}`);
+  console.log(`URL: ${state.settingsUrl}`);
+  console.log(`Buttons: ${state.buttons?.map((button) => button.text || button.ariaLabel).join(", ") || "(none)"}`);
+  if (state.comboboxes?.length) {
+    console.log(`Comboboxes: ${state.comboboxes.map((combobox) => combobox.text || combobox.label).join(", ")}`);
+  }
+  if (state.switches?.length) {
+    console.log(
+      `Switches: ${state.switches.map((control, index) => `${control.label || `switch-${index}`}:${control.checked ? "on" : "off"}`).join(", ")}`
+    );
+  }
+  if (state.rows?.length) {
+    console.log(`Rows: ${state.rows.length}`);
+  }
+}
+
+function printWorkspaceState(state) {
+  if (state.section === "all") {
+    console.log(`Workspace surfaces: ${Object.keys(state.sections || {}).join(", ")}`);
+    Object.values(state.sections || {}).forEach((sectionState) => {
+      printWorkspaceSectionState(sectionState);
+    });
+    return;
+  }
+
+  printWorkspaceSectionState(state);
+}
+
+function printGitState(state) {
+  console.log(`Git settings: ${state.settingsUrl}`);
+  console.log(`Provider: ${state.provider}`);
+  console.log(`Connected: ${state.connected ? "yes" : "no"}`);
+  console.log(`Repository: ${state.repository || "(none)"}`);
+  console.log(`Branch: ${state.branch || "(unknown)"}`);
+  console.log(`Account: ${state.account || "(unknown)"}`);
+  console.log(`Available actions: ${state.availableActions.join(", ") || "(none)"}`);
+}
+
+function printCodeState(state) {
+  console.log(`Code source: ${state.source}`);
+  console.log(`Repository: ${state.repository}`);
+  console.log(`Branch: ${state.branch}`);
+
+  if (state.tree) {
+    console.log(`Tree entries: ${state.tree.totalEntries}`);
+    state.tree.entries.forEach((entry) => {
+      console.log(`${entry.type || "node"} ${entry.path}`);
+    });
+  }
+
+  if (state.file) {
+    console.log(`File target: ${state.file.path}`);
+    console.log(`File type: ${state.file.type}`);
+    if (state.file.type === "directory") {
+      console.log(`Directory entries: ${state.file.totalEntries}`);
+      state.file.entries.forEach((entry) => {
+        console.log(`${entry.type || "node"} ${entry.path}`);
+      });
+    } else {
+      console.log(state.file.content);
+    }
+  }
+
+  if (state.search) {
+    console.log(`Search query: ${state.search.query}`);
+    console.log(`Search results: ${state.search.totalCount}`);
+    state.search.items.forEach((item) => {
+      console.log(`${item.path} (${item.sha})`);
+    });
+  }
+
+  if (state.downloadPath) {
+    console.log(`Downloaded to: ${state.downloadPath}`);
+  }
+}
+
+function printSpeedState(state) {
+  console.log(`Speed source: ${state.source}`);
+  console.log(`Preview URL: ${state.previewUrl}`);
+  state.audits.forEach((audit) => {
+    console.log(`[${audit.device}] performance=${audit.scores.performance ?? "n/a"} accessibility=${audit.scores.accessibility ?? "n/a"} best-practices=${audit.scores.bestPractices ?? "n/a"} seo=${audit.scores.seo ?? "n/a"}`);
+    console.log(`  report: ${audit.reportPath}`);
+  });
 }
 
 function printDashboardState(state, {
@@ -1711,6 +2477,7 @@ function printDomainSettingsState(state) {
   console.log(`Current subdomain: ${state.subdomain || "(missing)"}`);
   console.log(`Edit URL available: ${state.editUrlAvailable ? "yes" : "no"}`);
   console.log(`Connect existing domain available: ${state.connectExistingDomainAvailable ? "yes" : "no"}`);
+  console.log(`Custom domains: ${state.customDomains?.join(", ") || "(none)"}`);
   console.log(
     `Suggested purchase domains: ${state.suggestedPurchaseDomains?.join(", ") || "(none)"}`
   );
@@ -2114,6 +2881,16 @@ function resolveLiveVerifyOutputDir(targetUrl, outputDir) {
   const projectId = targetUrl.match(/\/projects\/([^/?#]+)/)?.[1] || "project";
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   return path.resolve(process.cwd(), "output", "live-verify", `${projectId}-${timestamp}`);
+}
+
+function resolveSpeedOutputDir(targetUrl, outputDir) {
+  if (outputDir) {
+    return path.resolve(outputDir);
+  }
+
+  const projectId = targetUrl.match(/\/projects\/([^/?#]+)/)?.[1] || "project";
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return path.resolve(process.cwd(), "output", "speed", `${projectId}-${timestamp}`);
 }
 
 function redactPreviewUrl(url) {

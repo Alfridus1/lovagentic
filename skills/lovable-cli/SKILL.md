@@ -1,6 +1,6 @@
 ---
 name: lovable-cli
-description: "Use this repo-local skill when work should drive Lovable through the `lovable-cli` project in this repository: list dashboard projects/workspaces, create apps, send prompts, guard against truncated prompts, answer Lovable clarification cards, switch build/plan, click proposal actions, inspect runtime errors with `Try to fix`, extract security findings, verify previews, and publish Lovable projects. Prefer this skill over ad hoc browser scripting when the task targets `lovable.dev` and can be done through the CLI. Do not use it for private desktop reverse engineering or unsupported domain-purchase flows."
+description: "Use this repo-local skill when work should drive Lovable through the `lovable-cli` project in this repository: list dashboard projects/workspaces, inspect toolbar/settings/git/code/speed/domain surfaces, create apps, send prompts, guard against truncated prompts, answer Lovable clarification cards, switch build/plan, click proposal actions, inspect runtime errors with `Try to fix`, extract security findings, verify previews, and publish Lovable projects. Prefer this skill over ad hoc browser scripting when the task targets `lovable.dev` and can be done through the CLI. Do not use it for private desktop reverse engineering or unsupported domain-purchase flows."
 metadata:
   {
     "openclaw":
@@ -21,6 +21,13 @@ Use this skill for:
 
 - Lovable project creation through build URLs
 - dashboard project/workspace listing through `list`
+- top-toolbar inspection through `toolbar`
+- project settings reads and safe writes through `project-settings`
+- project/workspace knowledge reads and guarded writes through `knowledge`
+- workspace/account settings inspection through `workspace`
+- project-bound Git/GitHub inspection through `git`
+- GitHub-backed code reading through `code`
+- Lighthouse-backed preview audits through `speed`
 - prompt-guarded prompt submission plus delayed clarification handling through `questions` / `question-answer`
 - `build` / `plan` mode switching
 - prompt submission and prompt-to-action loops
@@ -93,6 +100,28 @@ npm run start -- findings "<project-url>" \
   --profile-dir /tmp/lovable-cli-task \
   --seed-desktop-session
 
+npm run start -- toolbar "<project-url>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session
+
+npm run start -- project-settings "<project-url>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session
+
+npm run start -- git "<project-url>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session
+
+npm run start -- code "<project-url>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session \
+  --file "src/pages/Index.tsx"
+
+npm run start -- speed "<project-url>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session \
+  --device desktop
+
 npm run start -- verify "<project-url>" \
   --profile-dir /tmp/lovable-cli-task \
   --seed-desktop-session
@@ -116,4 +145,6 @@ npm run start -- publish "<project-url>" \
 - The CLI is the stable surface. Extend it before falling back to raw browser scripting.
 - `Try to fix` lives on the runtime error surface, not in chat actions.
 - `View findings` opens an inline pane, not a modal.
+- `code` and `speed` are pragmatic fallbacks: GitHub + Lighthouse, not DOM scraping of Lovable's in-app panes.
+- `knowledge` writes are guarded. If Lovable does not persist after reload, treat that as a product/UI limitation and fail loudly instead of pretending success.
 - Confirm persistence after reload or navigation when a Lovable action claims success.

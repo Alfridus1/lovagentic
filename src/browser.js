@@ -2475,12 +2475,19 @@ async function readDomainsSettingsStateFromPage(page) {
     const liveUrl = links
       .map((entry) => entry.href || entry.text)
       .find((value) => /\.(?:lovable\.app|lovableproject\.com)(?:\/|$)/i.test(value || "")) || null;
+    const text = normalize(main.innerText || main.textContent || "");
+    const lines = String(main.innerText || main.textContent || "")
+      .split(/\n+/)
+      .map(normalize)
+      .filter(Boolean);
 
     return {
       liveUrl,
       buttons,
       links,
-      suggestedDomains
+      suggestedDomains,
+      text,
+      lines
     };
   });
 }
@@ -3663,16 +3670,32 @@ export async function getProjectDomainSettingsState(page, {
     .filter((domain) => !/lovable\.dev$/i.test(domain))
     .filter((domain) => !/lovable\.app$/i.test(domain))
     .slice(0, 10);
+  const customDomains = Array.from(
+    new Set(
+      [...(snapshot.lines || []), ...(snapshot.links || []).map((entry) => entry.text || entry.href)]
+        .flatMap((value) => {
+          return String(value || "").match(/\b[a-z0-9-]+(?:\.[a-z0-9-]+)+\b/gi) || [];
+        })
+        .map((value) => value.toLowerCase())
+    )
+  )
+    .filter((domain) => domain !== liveHost)
+    .filter((domain) => !/lovable\.dev$/i.test(domain))
+    .filter((domain) => !/lovable\.app$/i.test(domain));
 
   return {
     projectUrl,
     settingsUrl,
     liveUrl,
     subdomain: liveHost ? liveHost.split(".")[0] : null,
+    text: snapshot.text,
+    lines: snapshot.lines,
     buttons: snapshot.buttons,
+    links: snapshot.links,
     editUrlAvailable: snapshot.buttons.some((button) => /^Edit URL$/i.test(button.text)),
     connectExistingDomainAvailable: snapshot.buttons.some((button) => /^Connect domain$/i.test(button.text)),
-    suggestedPurchaseDomains
+    suggestedPurchaseDomains,
+    customDomains
   };
 }
 
@@ -3755,5 +3778,1636 @@ export async function updateProjectSubdomain(page, {
     finalState,
     liveUrl,
     liveCheck
+  };
+}
+
+function getProjectSettingsUrl(projectUrl, section = "") {
+  const projectId = projectIdFromUrl(projectUrl);
+  if (!projectId) {
+    throw new Error("Expected a Lovable project URL.");
+  }
+
+  const url = new URL(projectUrl);
+  url.pathname = section
+    ? `/projects/${projectId}/settings/${section}`
+    : `/projects/${projectId}/settings`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+function normalizeProjectSettingsVisibility(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    throw new Error("Project visibility cannot be empty.");
+  }
+
+  if (["public", "anyone"].includes(normalized)) {
+    return "Public";
+  }
+
+  if (["workspace", "members"].includes(normalized)) {
+    return "Workspace";
+  }
+
+  if (["restrictedbusiness", "restricted-business", "restricted_business", "business"].includes(normalized)) {
+    return "RestrictedBusiness";
+  }
+
+  throw new Error(`Unsupported project visibility "${value}". Use one of: public, workspace, restricted-business.`);
+}
+
+function normalizeProjectSettingsCategory(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    throw new Error("Project category cannot be empty.");
+  }
+
+  const mappings = new Map([
+    ["internal tools", "Internal Tools"],
+    ["internal-tools", "Internal Tools"],
+    ["website", "Website"],
+    ["personal", "Personal"],
+    ["consumer app", "Consumer App"],
+    ["consumer-app", "Consumer App"],
+    ["b2b app", "B2B App"],
+    ["b2b-app", "B2B App"],
+    ["prototype", "Prototype"]
+  ]);
+
+  const matched = mappings.get(normalized);
+  if (!matched) {
+    throw new Error(`Unsupported project category "${value}". Use one of: Internal Tools, Website, Personal, Consumer App, B2B App, Prototype.`);
+  }
+
+  return matched;
+}
+
+function normalizeWorkspaceSection(section = "all") {
+  const normalized = String(section || "all").trim().toLowerCase();
+  const mappings = new Map([
+    ["all", "all"],
+    ["workspace", "workspace"],
+    ["people", "people"],
+    ["plans-credits", "billing"],
+    ["plans", "billing"],
+    ["billing", "billing"],
+    ["cloud-ai-balance", "usage"],
+    ["cloud-ai", "usage"],
+    ["usage", "usage"],
+    ["workspace-domains", "workspace-domains"],
+    ["privacy-security", "privacy-security"],
+    ["privacy", "privacy-security"],
+    ["account", "account"]
+  ]);
+
+  const matched = mappings.get(normalized);
+  if (!matched) {
+    throw new Error(
+      `Unsupported workspace section "${section}". Use one of: all, workspace, people, plans-credits, cloud-ai-balance, workspace-domains, privacy-security, account.`
+    );
+  }
+
+  return matched;
+}
+
+function normalizeGitProvider(value = "github") {
+  const normalized = String(value || "github").trim().toLowerCase();
+  if (!["github", "gitlab"].includes(normalized)) {
+    throw new Error(`Unsupported git provider "${value}". Use one of: github, gitlab.`);
+  }
+  return normalized;
+}
+
+async function gotoProjectSettings(page, projectUrl, section = "", {
+  timeoutMs = 120_000
+} = {}) {
+  const settingsUrl = getProjectSettingsUrl(projectUrl, section);
+  await page.goto(settingsUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: timeoutMs
+  });
+  return settingsUrl;
+}
+
+async function waitForSettingsMain(page, {
+  timeoutMs = 20_000,
+  headingPattern
+} = {}) {
+  const main = page.locator("main[aria-label='Settings content'], main").first();
+  await main.waitFor({
+    state: "visible",
+    timeout: timeoutMs
+  });
+
+  if (headingPattern) {
+    await page.getByText(headingPattern, {
+      exact: false
+    }).first().waitFor({
+      state: "visible",
+      timeout: timeoutMs
+    }).catch(() => {});
+  }
+
+  return main;
+}
+
+async function readSettingsPageSnapshotFromPage(page) {
+  return page.evaluate(() => {
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const main = document.querySelector("main[aria-label='Settings content']") || document.querySelector("main");
+    if (!(main instanceof HTMLElement)) {
+      return null;
+    }
+
+    const isRendered = (element) => {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0;
+    };
+
+    const dedupeByKey = (items, keyFn) => {
+      const seen = new Set();
+      return items.filter((item) => {
+        const key = keyFn(item);
+        if (!key || seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+    };
+
+    const getLabelForControl = (element) => {
+      if (!(element instanceof HTMLElement)) {
+        return "";
+      }
+
+      const ariaLabel = normalize(element.getAttribute("aria-label") || "");
+      if (ariaLabel) {
+        return ariaLabel;
+      }
+
+      const id = element.getAttribute("id");
+      if (id) {
+        const explicit = main.querySelector(`label[for="${id}"]`);
+        const explicitText = normalize(explicit?.textContent || "");
+        if (explicitText) {
+          return explicitText;
+        }
+      }
+
+      for (let current = element.parentElement; current && current !== main; current = current.parentElement) {
+        const candidates = Array.from(current.querySelectorAll("h1,h2,h3,h4,label,p,span,strong"))
+          .filter((candidate) => candidate instanceof HTMLElement && isRendered(candidate))
+          .map((candidate) => normalize(candidate.textContent || ""))
+          .filter((value) => value && value.length <= 120);
+
+        const matched = candidates.find((value) => {
+          return !/^(Docs|Close|Cancel|Save|Update|Delete|Transfer|Rename|Remix)$/i.test(value);
+        });
+
+        if (matched) {
+          return matched;
+        }
+      }
+
+      return "";
+    };
+
+    const headings = dedupeByKey(
+      Array.from(main.querySelectorAll("h1,h2,h3,h4"))
+        .filter((element) => element instanceof HTMLElement && isRendered(element))
+        .map((element) => normalize(element.textContent || ""))
+        .filter(Boolean),
+      (value) => value
+    );
+
+    const text = normalize(main.innerText || main.textContent || "");
+    const lines = String(main.innerText || main.textContent || "")
+      .split(/\n+/)
+      .map((value) => normalize(value))
+      .filter(Boolean);
+
+    const buttons = dedupeByKey(
+      Array.from(main.querySelectorAll("button,[role='button'],a[role='button']"))
+        .filter((element) => element instanceof HTMLElement && isRendered(element))
+        .map((element) => ({
+          text: normalize(element.textContent || ""),
+          ariaLabel: normalize(element.getAttribute("aria-label") || ""),
+          title: normalize(element.getAttribute("title") || ""),
+          disabled: element.matches("[disabled],[aria-disabled='true'],[data-disabled='true']")
+        }))
+        .filter((entry) => entry.text || entry.ariaLabel || entry.title),
+      (entry) => `${entry.text}|${entry.ariaLabel}|${entry.title}|${entry.disabled ? "disabled" : "enabled"}`
+    );
+
+    const links = dedupeByKey(
+      Array.from(main.querySelectorAll("a"))
+        .filter((element) => element instanceof HTMLElement && isRendered(element))
+        .map((element) => ({
+          text: normalize(element.textContent || ""),
+          href: element.getAttribute("href") || ""
+        }))
+        .filter((entry) => entry.text || entry.href),
+      (entry) => `${entry.text}|${entry.href}`
+    );
+
+    const comboboxes = dedupeByKey(
+      Array.from(main.querySelectorAll("[role='combobox'],button[aria-haspopup='listbox']"))
+        .filter((element) => element instanceof HTMLElement && isRendered(element))
+        .map((element) => ({
+          label: getLabelForControl(element),
+          text: normalize(element.textContent || ""),
+          expanded: element.getAttribute("aria-expanded") === "true"
+        }))
+        .filter((entry) => entry.text || entry.label),
+      (entry) => `${entry.label}|${entry.text}`
+    );
+
+    const switches = Array.from(main.querySelectorAll("[role='switch'],input[type='checkbox']"))
+      .filter((element) => element instanceof HTMLElement && isRendered(element))
+      .map((element) => {
+        const checked = element.getAttribute("aria-checked") === "true" ||
+          element.getAttribute("data-state") === "checked" ||
+          ("checked" in element && Boolean(element.checked));
+
+        return {
+          label: getLabelForControl(element),
+          checked,
+          disabled: element.matches("[disabled],[aria-disabled='true'],[data-disabled='true']")
+        };
+      });
+
+    const textareas = Array.from(main.querySelectorAll("textarea"))
+      .filter((element) => element instanceof HTMLElement && isRendered(element))
+      .map((element) => ({
+        label: getLabelForControl(element),
+        placeholder: normalize(element.getAttribute("placeholder") || ""),
+        value: "value" in element ? element.value : ""
+      }));
+
+    const inputs = Array.from(main.querySelectorAll("input:not([type='hidden']):not([type='checkbox']):not([type='radio'])"))
+      .filter((element) => element instanceof HTMLElement && isRendered(element))
+      .map((element) => ({
+        label: getLabelForControl(element),
+        type: element.getAttribute("type") || "text",
+        name: element.getAttribute("name") || "",
+        placeholder: normalize(element.getAttribute("placeholder") || ""),
+        value: "value" in element ? element.value : ""
+      }));
+
+    const rows = Array.from(main.querySelectorAll("tr"))
+      .filter((element) => element instanceof HTMLElement && isRendered(element))
+      .map((row) => {
+        return Array.from(row.querySelectorAll("th,td"))
+          .map((cell) => normalize(cell.textContent || ""))
+          .filter(Boolean);
+      })
+      .filter((row) => row.length > 0);
+
+    return {
+      headings,
+      text,
+      lines,
+      buttons,
+      links,
+      comboboxes,
+      switches,
+      textareas,
+      inputs,
+      rows
+    };
+  });
+}
+
+async function readToolbarSnapshotFromPage(page) {
+  return page.locator("button,[role='button'],a[role='button'],a").evaluateAll((elements) => {
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const isRendered = (element) => {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0 &&
+        rect.top >= 0 &&
+        rect.top <= 120;
+    };
+
+    return elements
+      .map((element, domIndex) => {
+        if (!(element instanceof HTMLElement) || !isRendered(element)) {
+          return null;
+        }
+
+        const rect = element.getBoundingClientRect();
+        const text = normalize(element.textContent || "");
+        const ariaLabel = normalize(element.getAttribute("aria-label") || "");
+        const title = normalize(element.getAttribute("title") || "");
+        const label = text || ariaLabel || title;
+        if (!label) {
+          return null;
+        }
+
+        return {
+          domIndex,
+          label,
+          text,
+          ariaLabel,
+          title,
+          tagName: element.tagName.toLowerCase(),
+          disabled: element.matches("[disabled],[aria-disabled='true'],[data-disabled='true']"),
+          menuCandidate: Boolean(
+            element.getAttribute("aria-haspopup") ||
+            /\.\.\.|more|share|github|switch project|settings|menu/i.test(label)
+          ),
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        if (left.y !== right.y) {
+          return left.y - right.y;
+        }
+        return left.x - right.x;
+      });
+  });
+}
+
+async function readVisibleMenuSurfaceSnapshots(page) {
+  return page.evaluate(() => {
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const isRendered = (element) => {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0;
+    };
+
+    return Array.from(document.querySelectorAll("[role='menu'],[role='dialog'],[role='alertdialog']"))
+      .filter((element) => element instanceof HTMLElement && isRendered(element))
+      .map((element, index) => {
+        const rect = element.getBoundingClientRect();
+        const buttons = Array.from(element.querySelectorAll("button,[role='button'],a[role='button']"))
+          .filter((candidate) => candidate instanceof HTMLElement && isRendered(candidate))
+          .map((candidate) => normalize(candidate.textContent || candidate.getAttribute("aria-label") || ""))
+          .filter(Boolean);
+        const links = Array.from(element.querySelectorAll("a"))
+          .filter((candidate) => candidate instanceof HTMLElement && isRendered(candidate))
+          .map((candidate) => ({
+            text: normalize(candidate.textContent || ""),
+            href: candidate.getAttribute("href") || ""
+          }))
+          .filter((entry) => entry.text || entry.href);
+        const text = normalize(element.innerText || element.textContent || "");
+        const lines = String(element.innerText || element.textContent || "")
+          .split(/\n+/)
+          .map((value) => normalize(value))
+          .filter(Boolean);
+
+        return {
+          index,
+          top: Math.round(rect.top),
+          left: Math.round(rect.left),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          text,
+          lines,
+          buttons,
+          links
+        };
+      })
+      .sort((left, right) => {
+        if (left.top !== right.top) {
+          return left.top - right.top;
+        }
+        return left.left - right.left;
+      });
+  });
+}
+
+function getMenuSurfaceSignature(surface) {
+  return `${surface.top}|${surface.left}|${surface.width}|${surface.height}|${surface.text.slice(0, 160)}`;
+}
+
+async function openToolbarMenu(page, buttonDescriptor, {
+  timeoutMs = 10_000,
+  settleMs = 500
+} = {}) {
+  const beforeSurfaces = await readVisibleMenuSurfaceSnapshots(page);
+  const beforeSignatures = new Set(beforeSurfaces.map((surface) => getMenuSurfaceSignature(surface)));
+  const locator = page.locator("button,[role='button'],a[role='button'],a").nth(buttonDescriptor.domIndex);
+
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await locator.click({ timeout: timeoutMs }).catch(async () => {
+    await locator.click({ timeout: Math.min(timeoutMs, 5_000), force: true }).catch(async () => {
+      await locator.evaluate((element) => element.click());
+    });
+  });
+
+  const deadline = Date.now() + timeoutMs;
+  let lastSurfaces = beforeSurfaces;
+
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(settleMs);
+    lastSurfaces = await readVisibleMenuSurfaceSnapshots(page);
+    const newSurface = lastSurfaces.find((surface) => !beforeSignatures.has(getMenuSurfaceSignature(surface)));
+    if (newSurface) {
+      return {
+        opened: true,
+        surface: newSurface
+      };
+    }
+  }
+
+  const fallbackSurface = [...lastSurfaces].reverse().find((surface) => {
+    return !beforeSignatures.has(getMenuSurfaceSignature(surface)) ||
+      surface.top <= 180;
+  }) || null;
+
+  return {
+    opened: Boolean(fallbackSurface),
+    surface: fallbackSurface
+  };
+}
+
+async function closeToolbarMenu(page) {
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.waitForTimeout(250);
+}
+
+async function getProjectSettingsComboboxLocators(page) {
+  const main = page.locator("main[aria-label='Settings content'], main").first();
+  const comboboxes = main.locator("[role='combobox'],button[aria-haspopup='listbox']");
+  const count = await comboboxes.count();
+  const results = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const locator = comboboxes.nth(index);
+    if (await locator.isVisible().catch(() => false)) {
+      results.push(locator);
+    }
+  }
+
+  const fallbackPatterns = [
+    /^Workspace$|^Public$|^RestrictedBusiness$/i,
+    /^Select category$|^Internal Tools$|^Website$|^Personal$|^Consumer App$|^B2B App$|^Prototype$/i
+  ];
+
+  for (const pattern of fallbackPatterns) {
+    const fallback = main.locator("button,[role='button'],[role='combobox']").filter({
+      hasText: pattern
+    }).first();
+    if (!(await fallback.isVisible().catch(() => false))) {
+      continue;
+    }
+
+    const fallbackText = normalizeText(await fallback.textContent().catch(() => ""));
+    const alreadyPresent = await Promise.all(results.map(async (locator) => {
+      const text = normalizeText(await locator.textContent().catch(() => ""));
+      return text === fallbackText;
+    }));
+
+    if (!alreadyPresent.some(Boolean)) {
+      results.push(fallback);
+    }
+  }
+
+  return results;
+}
+
+async function readProjectSettingsOptionsFromCombobox(page, locator, {
+  timeoutMs = 15_000
+} = {}) {
+  await locator.click({ timeout: timeoutMs });
+  await page.waitForTimeout(250);
+
+  const options = await page.evaluate(() => {
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const isRendered = (element) => {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0;
+    };
+
+    const optionElements = Array.from(document.querySelectorAll("[role='option'],[role='menuitemradio'],[cmdk-item],button"))
+      .filter((element) => element instanceof HTMLElement && isRendered(element))
+      .map((element) => {
+        const label = normalize(element.textContent || element.getAttribute("aria-label") || "");
+        if (!label) {
+          return null;
+        }
+
+        return {
+          label,
+          disabled: element.matches("[disabled],[aria-disabled='true'],[data-disabled='true']"),
+          selected: element.getAttribute("aria-checked") === "true" ||
+            element.getAttribute("data-state") === "checked"
+        };
+      })
+      .filter(Boolean);
+
+    return Array.from(
+      new Map(optionElements.map((option) => [option.label.toLowerCase(), option])).values()
+    );
+  });
+
+  await closeToolbarMenu(page);
+  return options;
+}
+
+async function chooseProjectSettingsComboboxOption(page, locator, label, {
+  timeoutMs = 15_000
+} = {}) {
+  if (typeof locator === "string") {
+    const deadline = Date.now() + timeoutMs;
+    let clicked = false;
+
+    while (Date.now() < deadline) {
+      clicked = await page.evaluate((targetLabel) => {
+        const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+        const main = document.querySelector("main[aria-label='Settings content']") || document.querySelector("main");
+        if (!(main instanceof HTMLElement)) {
+          return false;
+        }
+
+        const isRendered = (element) => {
+          if (!(element instanceof HTMLElement)) {
+            return false;
+          }
+
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          return rect.width > 0 &&
+            rect.height > 0 &&
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            Number(style.opacity || "1") > 0;
+        };
+
+        const candidates = Array.from(main.querySelectorAll("[role='combobox'],button,[role='button']"))
+          .filter((element) => element instanceof HTMLElement && isRendered(element))
+          .filter((element) => normalize(element.textContent || "") === targetLabel);
+
+        const candidate = candidates[0];
+        if (!(candidate instanceof HTMLElement)) {
+          return false;
+        }
+
+        candidate.click();
+        return true;
+      }, locator);
+
+      if (clicked) {
+        break;
+      }
+
+      await page.waitForTimeout(250);
+    }
+
+    if (!clicked) {
+      throw new Error(`Lovable project settings page did not expose the "${locator}" control.`);
+    }
+  } else {
+    await locator.click({ timeout: timeoutMs });
+  }
+  await page.waitForTimeout(250);
+
+  const escapedLabel = escapeRegExp(label);
+  const optionMatchers = [
+    page.getByRole("option", { name: new RegExp(`^${escapedLabel}$`, "i") }).first(),
+    page.getByRole("menuitemradio", { name: new RegExp(`^${escapedLabel}$`, "i") }).first(),
+    page.locator("[cmdk-item],button,[role='option'],[role='menuitemradio']").filter({
+      hasText: new RegExp(`^${escapedLabel}$`, "i")
+    }).first()
+  ];
+
+  for (const option of optionMatchers) {
+    if (await option.isVisible().catch(() => false)) {
+      await option.click({ timeout: timeoutMs }).catch(async () => {
+        await option.click({ timeout: Math.min(timeoutMs, 5_000), force: true }).catch(async () => {
+          await option.evaluate((element) => element.click());
+        });
+      });
+      await page.waitForTimeout(500);
+      return true;
+    }
+  }
+
+  await closeToolbarMenu(page);
+  throw new Error(`Lovable did not expose a "${label}" option in the current settings combobox.`);
+}
+
+async function waitForKnowledgeTextareas(page, {
+  timeoutMs = 20_000,
+  requireWorkspace = false
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let count = 0;
+
+  while (Date.now() < deadline) {
+    count = await page.locator("main textarea").count().catch(() => 0);
+    if (count >= (requireWorkspace ? 2 : 1)) {
+      return count;
+    }
+    await page.waitForTimeout(250);
+  }
+
+  throw new Error(
+    requireWorkspace
+      ? "Lovable knowledge settings did not expose both project and workspace textareas."
+      : "Lovable knowledge settings did not expose the project knowledge textarea."
+  );
+}
+
+function getLineAfter(lines, headingPattern) {
+  const index = lines.findIndex((line) => headingPattern.test(line));
+  if (index === -1) {
+    return null;
+  }
+
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    const value = lines[cursor];
+    if (!value) {
+      continue;
+    }
+    return value;
+  }
+
+  return null;
+}
+
+function parseRepositorySlugFromLines(lines) {
+  for (const line of lines) {
+    const match = line.match(/\b[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\b/);
+    if (match) {
+      return match[0];
+    }
+  }
+
+  return null;
+}
+
+async function clickSettingsButton(page, labelPattern, {
+  timeoutMs = 15_000
+} = {}) {
+  const main = page.locator("main[aria-label='Settings content'], main").first();
+  const button = main.getByRole("button", {
+    name: labelPattern
+  }).first();
+  await button.waitFor({
+    state: "visible",
+    timeout: timeoutMs
+  });
+  await button.click({ timeout: timeoutMs });
+  return button;
+}
+
+export async function getProjectToolbarState(page, {
+  projectUrl = page.url(),
+  menus = [],
+  timeoutMs = 20_000
+} = {}) {
+  await page.goto(projectUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: timeoutMs
+  });
+
+  await page.waitForLoadState("networkidle", {
+    timeout: 5_000
+  }).catch(() => {});
+
+  const buttons = await readToolbarSnapshotFromPage(page);
+  const normalizedRequestedMenus = menus.map((value) => normalizeText(value).toLowerCase()).filter(Boolean);
+  const requestedButtons = normalizedRequestedMenus.length > 0
+    ? buttons.filter((button) => {
+      const label = normalizeText(button.label).toLowerCase();
+      return normalizedRequestedMenus.some((requested) => label === requested || label.includes(requested));
+    })
+    : buttons.filter((button) => button.menuCandidate);
+
+  const openedMenus = [];
+  for (const button of requestedButtons) {
+    const result = await openToolbarMenu(page, button, {
+      timeoutMs: Math.min(timeoutMs, 10_000)
+    });
+    openedMenus.push({
+      button,
+      opened: result.opened,
+      surface: result.surface || null
+    });
+    await closeToolbarMenu(page);
+  }
+
+  return {
+    projectUrl,
+    buttons,
+    openedMenus
+  };
+}
+
+export async function getProjectSettingsState(page, {
+  projectUrl = page.url(),
+  timeoutMs = 60_000
+} = {}) {
+  const settingsUrl = await gotoProjectSettings(page, projectUrl, "", {
+    timeoutMs
+  });
+  await waitForSettingsMain(page, {
+    timeoutMs: Math.min(timeoutMs, 20_000),
+    headingPattern: /Project settings/i
+  });
+  await page.waitForLoadState("networkidle", {
+    timeout: 5_000
+  }).catch(() => {});
+  await page.waitForTimeout(1_000);
+
+  let snapshot = await readSettingsPageSnapshotFromPage(page);
+  if (!snapshot?.text && !snapshot?.lines?.length) {
+    await page.waitForTimeout(1_500);
+    snapshot = await readSettingsPageSnapshotFromPage(page);
+  }
+  if (!snapshot) {
+    throw new Error("Lovable project settings page did not render.");
+  }
+
+  const comboboxLocators = await getProjectSettingsComboboxLocators(page);
+  const visibilityOptions = comboboxLocators[0]
+    ? await readProjectSettingsOptionsFromCombobox(page, comboboxLocators[0], {
+      timeoutMs: Math.min(timeoutMs, 15_000)
+    }).catch(() => [])
+    : [];
+  const categoryOptions = comboboxLocators[1]
+    ? await readProjectSettingsOptionsFromCombobox(page, comboboxLocators[1], {
+      timeoutMs: Math.min(timeoutMs, 15_000)
+    }).catch(() => [])
+    : [];
+
+  const switches = snapshot.switches || [];
+  const visibilityLabelAllowList = new Set(["Public", "Workspace", "RestrictedBusiness"]);
+  const categoryLabelAllowList = new Set([
+    "Internal Tools",
+    "Website",
+    "Personal",
+    "Consumer App",
+    "B2B App",
+    "Prototype"
+  ]);
+
+  return {
+    projectUrl,
+    settingsUrl,
+    title: snapshot.headings[0] || "Project settings",
+    projectName: getLineAfter(snapshot.lines, /^Project name$/i),
+    urlSubdomain: getLineAfter(snapshot.lines, /^URL subdomain$/i),
+    owner: getLineAfter(snapshot.lines, /^Owner$/i),
+    createdAt: getLineAfter(snapshot.lines, /^Created at$/i),
+    techStack: getLineAfter(snapshot.lines, /^Tech stack$/i),
+    messagesCount: getLineAfter(snapshot.lines, /^Messages count$/i),
+    aiEditsCount: getLineAfter(snapshot.lines, /^AI edits count$/i),
+    visibility: {
+      current: snapshot.comboboxes[0]?.text || null,
+      label: snapshot.comboboxes[0]?.label || "Project visibility",
+      options: visibilityOptions.filter((option) => visibilityLabelAllowList.has(option.label))
+    },
+    category: {
+      current: snapshot.comboboxes[1]?.text || null,
+      label: snapshot.comboboxes[1]?.label || "Project category",
+      options: categoryOptions.filter((option) => categoryLabelAllowList.has(option.label))
+    },
+    hideLovableBadge: {
+      checked: switches[0]?.checked ?? null,
+      label: "Hide Lovable badge"
+    },
+    disableAnalytics: {
+      checked: switches[1]?.checked ?? null,
+      label: "Disable analytics"
+    },
+    crossProjectSharing: {
+      checked: switches[2]?.checked ?? null,
+      label: "Cross-project sharing"
+    },
+    availableActions: snapshot.buttons.map((button) => button.text || button.ariaLabel).filter(Boolean),
+    lines: snapshot.lines,
+    text: snapshot.text
+  };
+}
+
+export async function updateProjectSettings(page, {
+  projectUrl = page.url(),
+  visibility,
+  category,
+  hideLovableBadge,
+  disableAnalytics,
+  rename,
+  timeoutMs = 60_000
+} = {}) {
+  const initialState = await getProjectSettingsState(page, {
+    projectUrl,
+    timeoutMs
+  });
+
+  await gotoProjectSettings(page, projectUrl, "", {
+    timeoutMs
+  });
+  await waitForSettingsMain(page, {
+    timeoutMs: Math.min(timeoutMs, 20_000),
+    headingPattern: /Project settings/i
+  });
+
+  const changes = [];
+  const comboboxes = await getProjectSettingsComboboxLocators(page);
+  const main = page.locator("main[aria-label='Settings content'], main").first();
+  const directComboboxes = main.locator("[role='combobox']");
+  const directComboboxCount = await directComboboxes.count().catch(() => 0);
+  const visibleDirectComboboxes = [];
+  const directComboboxTexts = [];
+  for (let index = 0; index < directComboboxCount; index += 1) {
+    const locator = directComboboxes.nth(index);
+    if (!(await locator.isVisible().catch(() => false))) {
+      continue;
+    }
+    visibleDirectComboboxes.push(locator);
+    directComboboxTexts.push(
+      normalizeText(await locator.textContent().catch(() => ""))
+    );
+  }
+
+  if (visibility !== undefined) {
+    const targetVisibility = normalizeProjectSettingsVisibility(visibility);
+    if (normalizeText(initialState.visibility.current).toLowerCase() !== targetVisibility.toLowerCase()) {
+      const directVisibilityIndex = directComboboxTexts.findIndex((text) => {
+        return text.toLowerCase() === normalizeText(initialState.visibility.current || "Workspace").toLowerCase();
+      });
+      const visibilityTrigger = directVisibilityIndex >= 0
+        ? visibleDirectComboboxes[directVisibilityIndex]
+        : visibleDirectComboboxes.length > 0
+          ? visibleDirectComboboxes[0]
+          : comboboxes[0] || main.getByText(
+        new RegExp(`^${escapeRegExp(initialState.visibility.current || "Workspace")}$`, "i")
+      ).first();
+      await chooseProjectSettingsComboboxOption(page, visibilityTrigger, targetVisibility, {
+        timeoutMs: Math.min(timeoutMs, 15_000)
+      });
+      changes.push(`visibility=${targetVisibility}`);
+    }
+  }
+
+  if (category !== undefined) {
+    const targetCategory = normalizeProjectSettingsCategory(category);
+    if (normalizeText(initialState.category.current).toLowerCase() !== targetCategory.toLowerCase()) {
+      const currentCategoryLabel = initialState.category.current || "Select category";
+      const directCategoryIndex = directComboboxTexts.findIndex((text) => {
+        return text.toLowerCase() === normalizeText(currentCategoryLabel).toLowerCase();
+      });
+      const categoryTrigger = directCategoryIndex >= 0
+        ? visibleDirectComboboxes[directCategoryIndex]
+        : visibleDirectComboboxes.length > 1
+          ? visibleDirectComboboxes[1]
+          : comboboxes[1] || currentCategoryLabel;
+      await chooseProjectSettingsComboboxOption(page, categoryTrigger, targetCategory, {
+        timeoutMs: Math.min(timeoutMs, 15_000)
+      });
+      changes.push(`category=${targetCategory}`);
+    }
+  }
+
+  const visibleSwitches = page.locator("main [role='switch'], main input[type='checkbox']");
+  const switchCount = await visibleSwitches.count().catch(() => 0);
+  const setSwitch = async (index, desired, label) => {
+    if (desired === undefined) {
+      return;
+    }
+
+    if (index >= switchCount) {
+      throw new Error(`Lovable project settings page did not expose the ${label} switch.`);
+    }
+
+    const locator = visibleSwitches.nth(index);
+    const current = await locator.evaluate((element) => {
+      return element.getAttribute("aria-checked") === "true" ||
+        element.getAttribute("data-state") === "checked" ||
+        ("checked" in element && Boolean(element.checked));
+    });
+    if (current !== desired) {
+      await locator.click({ timeout: Math.min(timeoutMs, 15_000) });
+      await page.waitForTimeout(500);
+      changes.push(`${label}=${desired ? "on" : "off"}`);
+    }
+  };
+
+  await setSwitch(0, hideLovableBadge, "hideLovableBadge");
+  await setSwitch(1, disableAnalytics, "disableAnalytics");
+
+  if (rename !== undefined) {
+    const normalizedRename = String(rename).trim();
+    if (!normalizedRename) {
+      throw new Error("Rename value cannot be empty.");
+    }
+
+    if (normalizeText(initialState.projectName).toLowerCase() !== normalizedRename.toLowerCase()) {
+      await clickSettingsButton(page, /^Rename$/i, {
+        timeoutMs: Math.min(timeoutMs, 15_000)
+      });
+      const dialog = page.locator("[role='dialog'],[role='alertdialog']").filter({
+        hasText: /Rename project/i
+      }).last();
+      await dialog.waitFor({
+        state: "visible",
+        timeout: Math.min(timeoutMs, 15_000)
+      });
+      const input = dialog.locator("input[name='displayName']").first();
+      await input.waitFor({
+        state: "visible",
+        timeout: Math.min(timeoutMs, 15_000)
+      });
+      await input.fill(normalizedRename);
+      const saveButton = dialog.getByRole("button", {
+        name: /^Save$/i
+      }).first();
+      await saveButton.click({
+        timeout: Math.min(timeoutMs, 15_000)
+      });
+      await dialog.waitFor({
+        state: "hidden",
+        timeout: Math.min(timeoutMs, 20_000)
+      }).catch(() => {});
+      changes.push(`rename=${normalizedRename}`);
+    }
+  }
+
+  await page.waitForLoadState("networkidle", {
+    timeout: 5_000
+  }).catch(() => {});
+  await page.waitForTimeout(1_000);
+
+  const state = await getProjectSettingsState(page, {
+    projectUrl,
+    timeoutMs
+  });
+
+  return {
+    ok: true,
+    changes,
+    initialState,
+    state
+  };
+}
+
+export async function getProjectKnowledgeState(page, {
+  projectUrl = page.url(),
+  timeoutMs = 60_000
+} = {}) {
+  const settingsUrl = await gotoProjectSettings(page, projectUrl, "knowledge", {
+    timeoutMs
+  });
+  await waitForSettingsMain(page, {
+    timeoutMs: Math.min(timeoutMs, 20_000),
+    headingPattern: /Knowledge/i
+  });
+  await waitForKnowledgeTextareas(page, {
+    timeoutMs: Math.min(timeoutMs, 20_000),
+    requireWorkspace: false
+  });
+
+  const snapshot = await readSettingsPageSnapshotFromPage(page);
+  if (!snapshot) {
+    throw new Error("Lovable knowledge settings page did not render.");
+  }
+
+  return {
+    projectUrl,
+    settingsUrl,
+    title: snapshot.headings[0] || "Knowledge",
+    projectKnowledge: snapshot.textareas[0]?.value || "",
+    projectPlaceholder: snapshot.textareas[0]?.placeholder || "",
+    workspaceKnowledge: snapshot.textareas[1]?.value || "",
+    workspacePlaceholder: snapshot.textareas[1]?.placeholder || "",
+    availableActions: snapshot.buttons.map((button) => button.text || button.ariaLabel).filter(Boolean),
+    lines: snapshot.lines,
+    text: snapshot.text
+  };
+}
+
+export async function updateProjectKnowledge(page, {
+  projectUrl = page.url(),
+  projectText,
+  workspaceText,
+  timeoutMs = 60_000
+} = {}) {
+  const initialState = await getProjectKnowledgeState(page, {
+    projectUrl,
+    timeoutMs
+  });
+
+  await gotoProjectSettings(page, projectUrl, "knowledge", {
+    timeoutMs
+  });
+  await waitForSettingsMain(page, {
+    timeoutMs: Math.min(timeoutMs, 20_000),
+    headingPattern: /Knowledge/i
+  });
+  await waitForKnowledgeTextareas(page, {
+    timeoutMs: Math.min(timeoutMs, 20_000),
+    requireWorkspace: workspaceText !== undefined
+  });
+
+  const textareas = page.locator("main textarea");
+  const changes = [];
+
+  if (projectText !== undefined) {
+    const normalizedProjectText = String(projectText);
+    if (initialState.projectKnowledge !== normalizedProjectText) {
+      await textareas.nth(0).fill(normalizedProjectText);
+      changes.push("projectKnowledge");
+    }
+  }
+
+  if (workspaceText !== undefined) {
+    const normalizedWorkspaceText = String(workspaceText);
+    if (await textareas.count().catch(() => 0) < 2) {
+      throw new Error("Lovable knowledge settings did not expose the workspace knowledge textarea.");
+    }
+    if (initialState.workspaceKnowledge !== normalizedWorkspaceText) {
+      await textareas.nth(1).fill(normalizedWorkspaceText);
+      changes.push("workspaceKnowledge");
+    }
+  }
+
+  if (changes.length > 0) {
+    await page.locator("main").first().click({
+      position: {
+        x: 8,
+        y: 8
+      }
+    }).catch(() => {});
+    await page.waitForLoadState("networkidle", {
+      timeout: 5_000
+    }).catch(() => {});
+    await page.waitForTimeout(2_000);
+  }
+
+  const state = await getProjectKnowledgeState(page, {
+    projectUrl,
+    timeoutMs
+  });
+
+  const mismatches = [];
+  if (projectText !== undefined && state.projectKnowledge !== String(projectText)) {
+    mismatches.push("project knowledge");
+  }
+  if (workspaceText !== undefined && state.workspaceKnowledge !== String(workspaceText)) {
+    mismatches.push("workspace knowledge");
+  }
+
+  if (mismatches.length > 0) {
+    throw new Error(
+      `Lovable did not persist ${mismatches.join(" and ")} after reload.`
+    );
+  }
+
+  return {
+    ok: true,
+    changes,
+    initialState,
+    state
+  };
+}
+
+export async function getWorkspaceSettingsState(page, {
+  projectUrl = page.url(),
+  section = "all",
+  timeoutMs = 60_000
+} = {}) {
+  const normalizedSection = normalizeWorkspaceSection(section);
+  if (normalizedSection === "all") {
+    const sections = {};
+    for (const key of ["workspace", "people", "billing", "usage", "workspace-domains", "privacy-security", "account"]) {
+      sections[key] = await getWorkspaceSettingsState(page, {
+        projectUrl,
+        section: key,
+        timeoutMs
+      });
+    }
+    return {
+      projectUrl,
+      section: "all",
+      sections
+    };
+  }
+
+  const settingsUrl = await gotoProjectSettings(page, projectUrl, normalizedSection, {
+    timeoutMs
+  });
+  await waitForSettingsMain(page, {
+    timeoutMs: Math.min(timeoutMs, 20_000)
+  });
+  await page.waitForLoadState("networkidle", {
+    timeout: 5_000
+  }).catch(() => {});
+  await page.waitForTimeout(1_000);
+
+  let snapshot = await readSettingsPageSnapshotFromPage(page);
+  if (!snapshot?.text && !snapshot?.lines?.length) {
+    await page.waitForTimeout(1_500);
+    snapshot = await readSettingsPageSnapshotFromPage(page);
+  }
+  if (!snapshot) {
+    throw new Error(`Lovable workspace settings page "${normalizedSection}" did not render.`);
+  }
+
+  return {
+    projectUrl,
+    section: normalizedSection,
+    settingsUrl,
+    title: snapshot.headings[0] || normalizedSection,
+    headings: snapshot.headings,
+    buttons: snapshot.buttons,
+    links: snapshot.links,
+    comboboxes: snapshot.comboboxes,
+    switches: snapshot.switches,
+    rows: snapshot.rows,
+    lines: snapshot.lines,
+    text: snapshot.text
+  };
+}
+
+async function readProjectGitStateFromToolbar(page, {
+  projectUrl,
+  provider = "github",
+  timeoutMs = 20_000
+} = {}) {
+  await page.goto(projectUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: timeoutMs
+  });
+  await page.waitForLoadState("networkidle", {
+    timeout: 5_000
+  }).catch(() => {});
+
+  const buttons = await readToolbarSnapshotFromPage(page);
+  const normalizedProvider = normalizeGitProvider(provider);
+  const targetButton = buttons.find((button) => {
+    const label = normalizeText(button.label).toLowerCase();
+    return label.includes(`manage ${normalizedProvider}`);
+  });
+
+  if (!targetButton) {
+    return null;
+  }
+
+  const result = await openToolbarMenu(page, targetButton, {
+    timeoutMs: Math.min(timeoutMs, 10_000)
+  });
+  const surface = result.surface || null;
+  await closeToolbarMenu(page);
+
+  if (!surface) {
+    return null;
+  }
+
+  const repoLink = surface.links.find((link) => {
+    return /^https:\/\/github\.com\/[^/]+\/[^/]+/i.test(link.href || "") &&
+      !/github\.dev/i.test(link.href || "");
+  });
+  const repository = repoLink?.text || surface.lines.find((line) => /\b[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\b/.test(line)) || null;
+  const connected = /Connected/i.test(surface.text) || Boolean(repository);
+
+  return {
+    projectUrl,
+    provider: normalizedProvider,
+    settingsUrl: getProjectSettingsUrl(projectUrl, `git/${normalizedProvider}`),
+    connected,
+    repository,
+    branch: null,
+    account: repository ? repository.split("/")[0] : null,
+    title: capitalize(normalizedProvider),
+    availableActions: Array.from(
+      new Set([
+        ...surface.buttons,
+        ...surface.links.map((link) => link.text).filter(Boolean)
+      ])
+    ),
+    lines: surface.lines,
+    text: surface.text,
+    source: "toolbar"
+  };
+}
+
+export async function getProjectGitState(page, {
+  projectUrl = page.url(),
+  provider = "github",
+  timeoutMs = 60_000
+} = {}) {
+  const normalizedProvider = normalizeGitProvider(provider);
+  const toolbarState = await readProjectGitStateFromToolbar(page, {
+    projectUrl,
+    provider: normalizedProvider,
+    timeoutMs: Math.min(timeoutMs, 20_000)
+  }).catch(() => null);
+
+  if (toolbarState?.connected) {
+    return toolbarState;
+  }
+
+  const settingsUrl = await gotoProjectSettings(page, projectUrl, `git/${normalizedProvider}`, {
+    timeoutMs
+  });
+  await waitForSettingsMain(page, {
+    timeoutMs: Math.min(timeoutMs, 20_000),
+    headingPattern: /Git\/GitHub|Connect project|Repository connection|GitHub|GitLab/i
+  });
+
+  const snapshot = await readSettingsPageSnapshotFromPage(page);
+  if (!snapshot) {
+    throw new Error("Lovable git settings page did not render.");
+  }
+
+  const lines = snapshot.lines || [];
+  const repository = getLineAfter(lines, /^Repository$/i) || parseRepositorySlugFromLines(lines);
+  const branch = getLineAfter(lines, /^Branch$/i);
+  const account = getLineAfter(lines, /^Account$/i);
+  const connected = Boolean(repository) || lines.some((line) => /^Connected$/i.test(line));
+  const availableActions = snapshot.buttons.map((button) => button.text || button.ariaLabel).filter(Boolean);
+
+  return {
+    projectUrl,
+    provider: normalizedProvider,
+    settingsUrl,
+    connected,
+    repository,
+    branch,
+    account,
+    title: snapshot.headings[0] || `Git/${capitalize(normalizedProvider)}`,
+    availableActions,
+    lines,
+    text: snapshot.text,
+    source: "settings"
+  };
+}
+
+async function clickGitAction(page, patterns, {
+  timeoutMs = 15_000
+} = {}) {
+  const main = page.locator("main[aria-label='Settings content'], main").first();
+  for (const pattern of patterns) {
+    const button = main.getByRole("button", {
+      name: pattern
+    }).first();
+    if (await button.isVisible().catch(() => false)) {
+      await button.click({
+        timeout: timeoutMs
+      });
+      return true;
+    }
+  }
+  return false;
+}
+
+async function waitForGitConnectionState(page, {
+  projectUrl,
+  provider,
+  desiredConnected,
+  timeoutMs = 90_000,
+  pollMs = 1_000
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let lastState = await getProjectGitState(page, {
+    projectUrl,
+    provider,
+    timeoutMs: Math.min(timeoutMs, 30_000)
+  });
+
+  while (Date.now() < deadline) {
+    if (lastState.connected === desiredConnected) {
+      return lastState;
+    }
+    await page.waitForTimeout(pollMs);
+    lastState = await getProjectGitState(page, {
+      projectUrl,
+      provider,
+      timeoutMs: Math.min(timeoutMs, 30_000)
+    });
+  }
+
+  return lastState;
+}
+
+export async function connectProjectGitProvider(page, {
+  projectUrl = page.url(),
+  provider = "github",
+  timeoutMs = 90_000,
+  headless = false
+} = {}) {
+  const initialState = await getProjectGitState(page, {
+    projectUrl,
+    provider,
+    timeoutMs
+  });
+
+  if (initialState.connected) {
+    return {
+      ok: true,
+      changed: false,
+      initialState,
+      state: initialState
+    };
+  }
+
+  if (headless) {
+    throw new Error(
+      `Connecting ${normalizeGitProvider(provider)} may require interactive provider OAuth. Re-run without --headless.`
+    );
+  }
+
+  await gotoProjectSettings(page, projectUrl, `git/${normalizeGitProvider(provider)}`, {
+    timeoutMs
+  });
+  await waitForSettingsMain(page, {
+    timeoutMs: Math.min(timeoutMs, 20_000)
+  });
+
+  const clicked = await clickGitAction(page, [/^Add connection$/i, /^Connect$/i, /^Reconnect$/i], {
+    timeoutMs: Math.min(timeoutMs, 15_000)
+  });
+
+  if (!clicked) {
+    throw new Error(`Lovable did not expose a visible connect action for ${normalizeGitProvider(provider)}.`);
+  }
+
+  const state = await waitForGitConnectionState(page, {
+    projectUrl,
+    provider,
+    desiredConnected: true,
+    timeoutMs
+  });
+
+  if (!state.connected) {
+    throw new Error(
+      `Lovable did not confirm the ${normalizeGitProvider(provider)} connection. Finish any provider auth in the browser and retry.`
+    );
+  }
+
+  return {
+    ok: true,
+    changed: true,
+    initialState,
+    state
+  };
+}
+
+export async function reconnectProjectGitProvider(page, {
+  projectUrl = page.url(),
+  provider = "github",
+  timeoutMs = 90_000,
+  headless = false
+} = {}) {
+  if (headless) {
+    throw new Error(
+      `Reconnecting ${normalizeGitProvider(provider)} may require interactive provider OAuth. Re-run without --headless.`
+    );
+  }
+
+  const initialState = await getProjectGitState(page, {
+    projectUrl,
+    provider,
+    timeoutMs
+  });
+
+  await gotoProjectSettings(page, projectUrl, `git/${normalizeGitProvider(provider)}`, {
+    timeoutMs
+  });
+  await waitForSettingsMain(page, {
+    timeoutMs: Math.min(timeoutMs, 20_000)
+  });
+
+  const clicked = await clickGitAction(page, [/^Reconnect$/i, /^Connect$/i, /^Add connection$/i], {
+    timeoutMs: Math.min(timeoutMs, 15_000)
+  });
+
+  if (!clicked) {
+    throw new Error(`Lovable did not expose a visible reconnect action for ${normalizeGitProvider(provider)}.`);
+  }
+
+  const state = await waitForGitConnectionState(page, {
+    projectUrl,
+    provider,
+    desiredConnected: true,
+    timeoutMs
+  });
+
+  if (!state.connected) {
+    throw new Error(
+      `Lovable did not confirm the ${normalizeGitProvider(provider)} reconnect flow. Finish any provider auth in the browser and retry.`
+    );
+  }
+
+  return {
+    ok: true,
+    changed: true,
+    initialState,
+    state
+  };
+}
+
+export async function disconnectProjectGitProvider(page, {
+  projectUrl = page.url(),
+  provider = "github",
+  timeoutMs = 60_000
+} = {}) {
+  const initialState = await getProjectGitState(page, {
+    projectUrl,
+    provider,
+    timeoutMs
+  });
+
+  if (!initialState.connected) {
+    return {
+      ok: true,
+      changed: false,
+      initialState,
+      state: initialState
+    };
+  }
+
+  await gotoProjectSettings(page, projectUrl, `git/${normalizeGitProvider(provider)}`, {
+    timeoutMs
+  });
+  await waitForSettingsMain(page, {
+    timeoutMs: Math.min(timeoutMs, 20_000)
+  });
+
+  const clicked = await clickGitAction(page, [/^Disconnect$/i, /Remove connection/i, /Unlink/i], {
+    timeoutMs: Math.min(timeoutMs, 15_000)
+  });
+
+  if (!clicked) {
+    throw new Error(
+      `Lovable does not expose a visible disconnect action for ${normalizeGitProvider(provider)} on this project.`
+    );
+  }
+
+  const confirmDialog = page.locator("[role='dialog'],[role='alertdialog']").last();
+  if (await confirmDialog.isVisible().catch(() => false)) {
+    const confirmButton = confirmDialog.getByRole("button", {
+      name: /^Disconnect$|^Remove$|^Confirm$/i
+    }).first();
+    if (await confirmButton.isVisible().catch(() => false)) {
+      await confirmButton.click({
+        timeout: Math.min(timeoutMs, 15_000)
+      }).catch(() => {});
+    }
+  }
+
+  const state = await waitForGitConnectionState(page, {
+    projectUrl,
+    provider,
+    desiredConnected: false,
+    timeoutMs
+  });
+
+  if (state.connected) {
+    throw new Error(`Lovable did not confirm the ${normalizeGitProvider(provider)} disconnect.`);
+  }
+
+  return {
+    ok: true,
+    changed: true,
+    initialState,
+    state
+  };
+}
+
+export async function connectProjectDomain(page, {
+  projectUrl = page.url(),
+  domain,
+  advanced = false,
+  timeoutMs = 60_000
+} = {}) {
+  const normalizedDomain = String(domain || "").trim().toLowerCase();
+  if (!normalizedDomain || !/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(normalizedDomain)) {
+    throw new Error("Expected a valid fully-qualified custom domain, e.g. example.com or www.example.com.");
+  }
+
+  const initialState = await getProjectDomainSettingsState(page, {
+    projectUrl,
+    timeoutMs
+  });
+
+  if (initialState.customDomains.includes(normalizedDomain)) {
+    return {
+      ok: true,
+      changed: false,
+      initialState,
+      finalState: initialState,
+      listed: true
+    };
+  }
+
+  await gotoProjectDomainsSettings(page, projectUrl, {
+    timeoutMs
+  });
+  await waitForSettingsMain(page, {
+    timeoutMs: Math.min(timeoutMs, 20_000),
+    headingPattern: /Domains/i
+  });
+
+  await clickSettingsButton(page, /^Connect domain$/i, {
+    timeoutMs: Math.min(timeoutMs, 15_000)
+  });
+
+  const dialog = page.locator("[role='dialog'],[role='alertdialog']").filter({
+    hasText: /Connect a domain/i
+  }).last();
+  await dialog.waitFor({
+    state: "visible",
+    timeout: Math.min(timeoutMs, 15_000)
+  });
+
+  const input = dialog.locator("input[placeholder='example.com'],input[type='text']").first();
+  await input.waitFor({
+    state: "visible",
+    timeout: Math.min(timeoutMs, 15_000)
+  });
+  await input.fill(normalizedDomain);
+
+  if (advanced) {
+    const advancedButton = dialog.getByRole("button", {
+      name: /^Advanced$/i
+    }).first();
+    if (await advancedButton.isVisible().catch(() => false)) {
+      await advancedButton.click({
+        timeout: Math.min(timeoutMs, 10_000)
+      }).catch(() => {});
+      await page.waitForTimeout(250);
+    }
+  }
+
+  const connectButton = dialog.getByRole("button", {
+    name: /^Connect$/i
+  }).first();
+  await connectButton.click({
+    timeout: Math.min(timeoutMs, 15_000)
+  });
+
+  await dialog.waitFor({
+    state: "hidden",
+    timeout: Math.min(timeoutMs, 30_000)
+  }).catch(() => {});
+  await page.waitForLoadState("networkidle", {
+    timeout: 5_000
+  }).catch(() => {});
+  await page.waitForTimeout(1_000);
+
+  const finalState = await getProjectDomainSettingsState(page, {
+    projectUrl,
+    timeoutMs
+  });
+  const listed = finalState.customDomains.includes(normalizedDomain);
+
+  if (!listed) {
+    throw new Error(
+      `Lovable accepted the custom domain dialog, but the domain "${normalizedDomain}" is not visible on the domains page yet.`
+    );
+  }
+
+  return {
+    ok: true,
+    changed: true,
+    initialState,
+    finalState,
+    listed
   };
 }

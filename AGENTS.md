@@ -81,6 +81,13 @@ npm run start -- verify "https://lovable.dev/projects/..."
 npm run start -- publish "https://lovable.dev/projects/..."
 npm run start -- publish-settings "https://lovable.dev/projects/..."
 npm run start -- domain "https://lovable.dev/projects/..."
+npm run start -- toolbar "https://lovable.dev/projects/..."
+npm run start -- project-settings "https://lovable.dev/projects/..."
+npm run start -- git "https://lovable.dev/projects/..."
+npm run start -- code "https://lovable.dev/projects/..."
+npm run start -- speed "https://lovable.dev/projects/..."
+npm run start -- workspace "https://lovable.dev/projects/..."
+npm run start -- knowledge "https://lovable.dev/projects/..."
 ```
 
 ## Safe Testing Policy
@@ -111,6 +118,11 @@ For a new machine or new agent run:
 4. `npm run start -- publish "<project-url>" --verify-live`
 5. `npm run start -- publish-settings "<project-url>"`
 6. `npm run start -- domain "<project-url>"`
+7. `npm run start -- toolbar "<project-url>" --json`
+8. `npm run start -- project-settings "<project-url>" --json`
+9. `npm run start -- git "<project-url>" --json`
+10. `npm run start -- code "<project-url>" --limit 20 --json`
+11. `npm run start -- speed "<project-url>" --device desktop --json`
 
 For prompt regression checks:
 
@@ -147,13 +159,26 @@ For a single end-to-end proposal run:
   - visibility inspection
   - title/description editing
 - `.lovable.app` subdomain editing through the domains settings page
+- top-toolbar inspection including project/share/GitHub/publish menus
+- project settings inspection plus safe writes for:
+  - visibility
+  - category
+  - `Hide Lovable badge`
+  - `Disable analytics`
+  - rename
+- project-bound Git/GitHub inspection
+- GitHub-backed code reading through the connected repo
+- Lighthouse-backed speed auditing against the current preview URL
+- workspace/account settings inspection across the visible settings sections
+- knowledge inspection, with guarded writes that fail if Lovable does not persist after reload
 
 ## Known Gaps
 
-- custom domain connection is mapped in the UI but not submitted by the CLI yet
+- fresh custom-domain connection submission is implemented, but it has only been validated idempotently against already listed domains so far
 - domain purchase/registrar flows are not automated
 - headless login/prompt flows can still fail on verification challenges
 - visual verification is screenshot/runtime-based, not a golden pixel diff
+- knowledge writes are guarded: the CLI now errors when Lovable does not persist the edit after reload, and current headless smoke runs still hit that product/UI limitation
 
 ## Important Product Observation
 

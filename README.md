@@ -323,6 +323,71 @@ npm run start -- domain "https://lovable.dev/projects/your-project" \
   --subdomain "my-new-slug"
 ```
 
+Inspect the current project toolbar and open menu-style toolbar surfaces:
+
+```bash
+npm run start -- toolbar "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --headless
+```
+
+Inspect or update low-risk project settings:
+
+```bash
+npm run start -- project-settings "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --category "Website" \
+  --hide-lovable-badge true \
+  --disable-analytics true
+```
+
+Inspect the connected Git/GitHub state:
+
+```bash
+npm run start -- git "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --headless
+```
+
+Read the connected GitHub repo as a pragmatic Code-surface fallback:
+
+```bash
+npm run start -- code "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --file "src/pages/Index.tsx"
+```
+
+Run the pragmatic Speed-surface fallback with Lighthouse against the live preview:
+
+```bash
+npm run start -- speed "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --device both
+```
+
+Inspect workspace/account settings without mutating them:
+
+```bash
+npm run start -- workspace "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --section all
+```
+
+Inspect project/workspace knowledge:
+
+```bash
+npm run start -- knowledge "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --headless
+```
+
 ## Notes
 
 - `create` opens the system browser because the desktop app does not expose a documented URL-open control surface.
@@ -347,14 +412,21 @@ npm run start -- domain "https://lovable.dev/projects/your-project" \
 - `publish` currently follows the default Lovable publish path: suggested `.lovable.app` subdomain and the default visibility selection shown in the wizard.
 - `publish` now also handles already-published projects that show `Update` instead of `Publish`, and waits for that redeploy to complete.
 - `publish-settings` automates the published project's `Edit settings` surface, including the nested `Save changes` step that Lovable requires after closing the `Website info` or `Visibility` submenus.
-- `domain` inspects the `/settings/domains` page and can update the default `.lovable.app` slug by driving the `Edit URL` dialog.
+- `toolbar` inspects the top project toolbar and can open menu-style toolbar surfaces such as the project menu, share menu, GitHub menu, and publish surface.
+- `project-settings` reads the real `/settings` page and can safely update visibility, category, `Hide Lovable badge`, `Disable analytics`, and rename.
+- `git` reads the project-bound Git/GitHub state from the toolbar when possible and falls back to the settings pages for generic provider management.
+- `code` is a pragmatic fallback that reads the connected GitHub repo through `gh api`; it does not scrape Lovable's in-app code editor DOM.
+- `speed` is a pragmatic fallback that audits the current preview URL with Lighthouse; it does not scrape Lovable's in-app speed cards directly.
+- `workspace` reads the visible workspace/account settings pages (`workspace`, `people`, `plans-credits`, `cloud-ai-balance`, `workspace-domains`, `privacy-security`, `account`) in inspect-only mode.
+- `knowledge` can read project/workspace knowledge and attempts writes, but it now fails explicitly if Lovable does not persist the edit after reload.
+- `domain` inspects the `/settings/domains` page, can update the default `.lovable.app` slug, and can submit `Connect domain` when the requested domain becomes visible afterward.
 - If the website info step is empty, Lovable may auto-edit `index.html` with default title/description metadata before it deploys. The CLI reports when that happens.
 - `verify` resolves the live preview iframe, captures desktop and mobile screenshots, and writes `summary.json` with console errors, failed requests, and basic DOM stats.
 - Preview verification now also checks for horizontal overflow / obvious out-of-viewport elements and can assert `--expect-text` / `--forbid-text`.
 - `--fail-on-console` turns preview console warnings/errors into a blocking verify failure. Without it, console issues are still reported in `summary.json` but do not fail the command.
 - `import-desktop-session` is best-effort. Chromium/Electron session reuse on macOS is not guaranteed, so manual `login` is the reliable path.
 - `import-desktop-session` copies desktop auth/storage into Playwright's `Default/` profile layout.
-- The publish surface also exposes `Add custom domain`, `Edit settings`, live visitor counts, and a security scan entry point. `Edit settings` and the default `.lovable.app` slug are automated now; `Connect domain` / registrar purchase are mapped in the UI but not submitted by the CLI yet.
+- The publish surface also exposes `Add custom domain`, `Edit settings`, live visitor counts, and a security scan entry point. `Edit settings`, the default `.lovable.app` slug, and the direct `Connect domain` dialog are automated now; registrar purchase is still out of scope.
 - Lovable may trigger an interactive `Verification required` challenge after submit. In a visible browser run, the CLI now waits for that challenge to clear and then re-checks persistence after a reload.
 - Headless `prompt` runs are still best-effort. The CLI now treats "local echo only" as a failure and exits if the prompt does not survive a reload.
 - If Lovable changes its composer DOM, use `--selector` or `--submit-selector` to override the heuristics.
