@@ -1,0 +1,104 @@
+---
+name: lovable-cli
+description: "Use this repo-local skill when work should drive Lovable through the `lovable-cli` project in this repository: create apps, send prompts, switch build/plan, click proposal actions, inspect runtime errors with `Try to fix`, extract security findings, verify previews, and publish Lovable projects. Prefer this skill over ad hoc browser scripting when the task targets `lovable.dev` and can be done through the CLI. Do not use it for private desktop reverse engineering or unsupported domain-purchase flows."
+metadata:
+  {
+    "openclaw":
+      {
+        "emoji": "💗",
+        "requires": { "bins": ["node", "npm", "npx"] },
+      },
+  }
+---
+
+# lovable-cli
+
+Use the local CLI in this repo instead of rebuilding Lovable browser flows from scratch.
+
+## Scope
+
+Use this skill for:
+
+- Lovable project creation through build URLs
+- `build` / `plan` mode switching
+- prompt submission and prompt-to-action loops
+- visible proposal actions near the composer
+- runtime/build error handling with `Try to fix` and `Show logs`
+- inline security findings extraction via `View findings`
+- preview/live verification and publish flows
+
+Do not use this skill for:
+
+- private Electron IPC, desktop sockets, or backend reverse engineering
+- unsupported registrar or domain-purchase flows
+- parallel runs against the same `--profile-dir`
+
+## Start Here
+
+Work from the repo root:
+
+```bash
+cd /Users/tobik/Documents/Playground/lovable-cli
+npm install
+npx playwright install chromium
+```
+
+Read [AGENTS.md](../../AGENTS.md) first for repo-specific safety rules.
+Open [README.md](../../README.md) only when you need full command flags or examples.
+
+## Session Rules
+
+- Prefer a fresh profile dir per run: `--profile-dir /tmp/lovable-cli-<task>`
+- Prefer `--seed-desktop-session`; fall back to `npm run start -- login`
+- If Lovable asks for verification, rerun visibly instead of forcing headless
+- Treat one profile dir as single-run ownership
+
+## Core Commands
+
+```bash
+npm run start -- prompt "<project-url>" "<prompt>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session
+
+npm run start -- chat-loop "<project-url>" "<prompt>" \
+  --mode plan \
+  --action "Approve" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session
+
+npm run start -- errors "<project-url>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session
+
+npm run start -- error-action "<project-url>" "Try to fix" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session
+
+npm run start -- findings "<project-url>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session
+
+npm run start -- verify "<project-url>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session
+
+npm run start -- publish "<project-url>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session
+```
+
+## Preferred Flow
+
+1. Use `mode` or `chat-loop` to choose `build` or `plan`.
+2. Use `prompt` or `chat-loop` for the main change.
+3. Use `actions` / `action` for proposal chips.
+4. Use `errors` / `error-action` if the preview breaks.
+5. Use `findings` for the security scan surface.
+6. Use `verify` or `publish --verify-live` before closing.
+
+## Important Notes
+
+- The CLI is the stable surface. Extend it before falling back to raw browser scripting.
+- `Try to fix` lives on the runtime error surface, not in chat actions.
+- `View findings` opens an inline pane, not a modal.
+- Confirm persistence after reload or navigation when a Lovable action claims success.

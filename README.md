@@ -30,6 +30,10 @@ That makes two surfaces practical for a user-owned CLI:
 
 This prototype stays on the stable side.
 
+Repo-local OpenClaw skill:
+
+- [skills/lovable-cli/SKILL.md](/Users/tobik/Documents/Playground/lovable-cli/skills/lovable-cli/SKILL.md)
+
 ## Install
 
 ```bash

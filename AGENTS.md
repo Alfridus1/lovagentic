@@ -10,6 +10,10 @@
 
 Do not treat this repo as a private desktop reverse-engineering client. The design goal is explicitly to avoid Lovable's private Electron IPC or undocumented desktop WebSocket auth.
 
+Repo-local OpenClaw skill:
+
+- [skills/lovable-cli/SKILL.md](/Users/tobik/Documents/Playground/lovable-cli/skills/lovable-cli/SKILL.md)
+
 ## Operating Model
 
 Use these surfaces:
