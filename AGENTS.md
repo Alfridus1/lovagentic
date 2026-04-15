@@ -68,6 +68,8 @@ npm run start -- login
 npm run start -- list
 npm run start -- create "Build a simple landing page"
 npm run start -- prompt "https://lovable.dev/projects/..." "Add a hero CTA"
+npm run start -- questions "https://lovable.dev/projects/..."
+npm run start -- question-answer "https://lovable.dev/projects/..." "Concrete answer text"
 npm run start -- mode "https://lovable.dev/projects/..." plan
 npm run start -- actions "https://lovable.dev/projects/..."
 npm run start -- action "https://lovable.dev/projects/..." "Approve"
@@ -127,7 +129,10 @@ For a single end-to-end proposal run:
 - project creation through build URLs
 - dashboard project/workspace listing through the logged-in `/dashboard` page
 - prompt submission with server-side accept checks
+- prompt guard for obviously truncated prompts
 - `build` and `plan` composer mode switching
+- reading Lovable clarification cards through `questions`
+- answering free-text Lovable clarification cards through `question-answer`
 - listing visible chat-side proposal actions near the composer
 - clicking button-driven follow-ups such as `Approve`, `Skip`, or similar Lovable proposal actions
 - reading Lovable's separate runtime/build error surface with `Try to fix` / `Show logs`

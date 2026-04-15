@@ -1,6 +1,6 @@
 ---
 name: lovable-cli
-description: "Use this repo-local skill when work should drive Lovable through the `lovable-cli` project in this repository: list dashboard projects/workspaces, create apps, send prompts, switch build/plan, click proposal actions, inspect runtime errors with `Try to fix`, extract security findings, verify previews, and publish Lovable projects. Prefer this skill over ad hoc browser scripting when the task targets `lovable.dev` and can be done through the CLI. Do not use it for private desktop reverse engineering or unsupported domain-purchase flows."
+description: "Use this repo-local skill when work should drive Lovable through the `lovable-cli` project in this repository: list dashboard projects/workspaces, create apps, send prompts, guard against truncated prompts, answer Lovable clarification cards, switch build/plan, click proposal actions, inspect runtime errors with `Try to fix`, extract security findings, verify previews, and publish Lovable projects. Prefer this skill over ad hoc browser scripting when the task targets `lovable.dev` and can be done through the CLI. Do not use it for private desktop reverse engineering or unsupported domain-purchase flows."
 metadata:
   {
     "openclaw":
@@ -21,6 +21,7 @@ Use this skill for:
 
 - Lovable project creation through build URLs
 - dashboard project/workspace listing through `list`
+- prompt-guarded prompt submission plus delayed clarification handling through `questions` / `question-answer`
 - `build` / `plan` mode switching
 - prompt submission and prompt-to-action loops
 - visible proposal actions near the composer
@@ -58,6 +59,14 @@ Open [README.md](../../README.md) only when you need full command flags or examp
 
 ```bash
 npm run start -- prompt "<project-url>" "<prompt>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session
+
+npm run start -- questions "<project-url>" \
+  --profile-dir /tmp/lovable-cli-task \
+  --seed-desktop-session
+
+npm run start -- question-answer "<project-url>" "Concrete clarification answer" \
   --profile-dir /tmp/lovable-cli-task \
   --seed-desktop-session
 

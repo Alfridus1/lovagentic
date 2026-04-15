@@ -14,8 +14,10 @@ import {
   getProfileDir
 } from "./config.js";
 import {
+  answerProjectQuestion,
   capturePreviewSnapshot,
   clickChatAction,
+  clickQuestionAction,
   clickRuntimeErrorAction,
   ensureSignedIn,
   fillPrompt,
@@ -23,6 +25,7 @@ import {
   getCurrentPromptMode,
   getProjectFindingsState,
   getProjectDomainSettingsState,
+  getProjectQuestionState,
   getProjectRuntimeErrorState,
   getPublishedSettingsState,
   hasLovableSession,
@@ -371,6 +374,10 @@ program
   .option("--fail-on-console", "Treat preview console warnings/errors as blocking during verify", false)
   .option("--expect-text <text>", "Assert that preview body text contains this string", collectValues, [])
   .option("--forbid-text <text>", "Assert that preview body text does not contain this string", collectValues, [])
+  .option("--allow-fragment", "Send a prompt even if it looks truncated or unfinished", false)
+  .option("--answer-question <text>", "If Lovable opens a Questions card after the prompt, answer it with this text")
+  .option("--question-option <label>", "Question option label to target before filling free text", "Other")
+  .option("--question-timeout-ms <ms>", "How long to wait for a delayed Questions card after the prompt", parseInteger, 8_000)
   .option("--selector <selector>", "Override the prompt input selector")
   .option("--submit-selector <selector>", "Override the submit button selector")
   .option("--wait-after-submit-ms <ms>", "Delay before the browser closes", parseInteger, 4000)
@@ -414,6 +421,13 @@ program
         console.log(`Lovable mode ready: ${modeResult.currentMode}`);
       }
 
+      const promptWarnings = assertPromptLooksComplete(prompt, {
+        allowFragment: Boolean(options.allowFragment)
+      });
+      if (promptWarnings.length > 0) {
+        console.log(`Prompt guard bypassed: ${promptWarnings.join(" ")}`);
+      }
+
       const promptTurn = await runPromptTurn(page, {
         normalizedUrl,
         prompt,
@@ -434,6 +448,30 @@ program
       console.log("Lovable acknowledged the prompt and it persisted after reload.");
       if (promptTurn.verificationResolved?.reason) {
         console.log(`Verification path: ${promptTurn.verificationResolved.reason}.`);
+      }
+
+      const questionState = await getProjectQuestionState(page, {
+        timeoutMs: options.questionTimeoutMs,
+        pollMs: 250
+      });
+      if (questionState.open) {
+        console.log(`Lovable follow-up question: ${questionState.prompt || "(prompt missing)"}`);
+        if (options.answerQuestion) {
+          const answerResult = await answerProjectQuestion(page, {
+            projectUrl: normalizedUrl,
+            answer: options.answerQuestion,
+            optionLabel: options.questionOption
+          });
+          console.log(`Answered question via ${answerResult.fillResult.method} (${answerResult.fillResult.tagName}).`);
+          if (answerResult.chatAccepted?.ok) {
+            console.log("Lovable accepted the question answer on the server.");
+          }
+          if (answerResult.stateAfter?.open) {
+            console.log("Lovable still shows a question card after the submitted answer.");
+          }
+        } else {
+          console.log("Lovable is waiting for an answer. Use `questions` / `question-answer`, or re-run with --answer-question.");
+        }
       }
 
       if (options.verify) {
@@ -593,6 +631,190 @@ program
       if (!keepOpen) {
         await context.close();
       }
+    }
+  });
+
+program
+  .command("questions")
+  .description("Read the visible Lovable Questions card, including its current prompt and footer actions.")
+  .argument("<target-url>", "Lovable project URL")
+  .option("--profile-dir <path>", "Override the CLI browser profile path")
+  .option("--seed-desktop-session", "Refresh the Playwright profile from the desktop app before launch", false)
+  .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
+  .option("--headless", "Run headlessly instead of opening a visible browser", false)
+  .option("--timeout-ms <ms>", "How long to wait for the Questions card", parseInteger, 5_000)
+  .option("--poll-ms <ms>", "Polling interval while waiting for the Questions card", parseInteger, 250)
+  .option("--json", "Print the extracted Questions card state as JSON", false)
+  .action(async (targetUrl, options) => {
+    const profileDir = getProfileDir(options.profileDir);
+    if (options.seedDesktopSession) {
+      await seedDesktopProfileIntoPlaywrightDefault({
+        fromDir: getDesktopProfileDir(options.desktopProfileDir),
+        toDir: profileDir,
+        force: true
+      });
+    }
+
+    const context = await launchLovableContext({
+      profileDir,
+      headless: Boolean(options.headless)
+    });
+
+    try {
+      const page = context.pages()[0] || await context.newPage();
+      const normalizedUrl = normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL);
+      await page.goto(normalizedUrl, { waitUntil: "domcontentloaded" });
+
+      const hasSession = await hasLovableSession(page);
+      if (!hasSession) {
+        throw new Error(
+          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+        );
+      }
+
+      const state = await getProjectQuestionState(page, {
+        timeoutMs: options.timeoutMs,
+        pollMs: options.pollMs
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(state, null, 2));
+        return;
+      }
+
+      printQuestionState(state);
+    } finally {
+      await context.close();
+    }
+  });
+
+program
+  .command("question-action")
+  .description("Click a visible Lovable Questions-card action, such as Skip, Submit, or Next question.")
+  .argument("<target-url>", "Lovable project URL")
+  .argument("<label>", "Visible question action label or aria-label")
+  .option("--profile-dir <path>", "Override the CLI browser profile path")
+  .option("--seed-desktop-session", "Refresh the Playwright profile from the desktop app before launch", false)
+  .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
+  .option("--headless", "Run headlessly instead of opening a visible browser", false)
+  .option("--exact", "Require an exact case-insensitive label match", false)
+  .option("--index <n>", "Zero-based match index if more than one question action label matches", parseInteger, 0)
+  .option("--timeout-ms <ms>", "How long to wait for the question action click", parseInteger, 15_000)
+  .option("--actions-timeout-ms <ms>", "How long to wait for visible question actions before and after the click", parseInteger, 5_000)
+  .option("--actions-poll-ms <ms>", "Polling interval while waiting for visible question actions", parseInteger, 250)
+  .option("--settle-ms <ms>", "Extra wait time after the click before reading the question card again", parseInteger, 1_500)
+  .action(async (targetUrl, label, options) => {
+    const profileDir = getProfileDir(options.profileDir);
+    if (options.seedDesktopSession) {
+      await seedDesktopProfileIntoPlaywrightDefault({
+        fromDir: getDesktopProfileDir(options.desktopProfileDir),
+        toDir: profileDir,
+        force: true
+      });
+    }
+
+    const context = await launchLovableContext({
+      profileDir,
+      headless: Boolean(options.headless)
+    });
+
+    try {
+      const page = context.pages()[0] || await context.newPage();
+      const normalizedUrl = normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL);
+      await page.goto(normalizedUrl, { waitUntil: "domcontentloaded" });
+
+      const hasSession = await hasLovableSession(page);
+      if (!hasSession) {
+        throw new Error(
+          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+        );
+      }
+
+      const result = await clickQuestionAction(page, {
+        label,
+        exact: Boolean(options.exact),
+        matchIndex: options.index,
+        timeoutMs: options.timeoutMs,
+        settleMs: options.settleMs,
+        actionsTimeoutMs: options.actionsTimeoutMs,
+        actionsPollMs: options.actionsPollMs
+      });
+
+      console.log(`Clicked question action: ${result.clicked.label}`);
+      printQuestionState(result.stateAfterClick);
+    } finally {
+      await context.close();
+    }
+  });
+
+program
+  .command("question-answer")
+  .description("Fill the visible Lovable Questions-card free-text field and optionally submit it.")
+  .argument("<target-url>", "Lovable project URL")
+  .argument("<answer>", "Answer text for the current free-text question")
+  .option("--profile-dir <path>", "Override the CLI browser profile path")
+  .option("--seed-desktop-session", "Refresh the Playwright profile from the desktop app before launch", false)
+  .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
+  .option("--headless", "Run headlessly instead of opening a visible browser", false)
+  .option("--option <label>", "Question option label to target before filling free text", "Other")
+  .option("--timeout-ms <ms>", "How long to wait for the question field", parseInteger, 15_000)
+  .option("--settle-ms <ms>", "Extra wait time after clicking Submit", parseInteger, 1_500)
+  .option("--actions-timeout-ms <ms>", "How long to wait for the question card before and after submit", parseInteger, 5_000)
+  .option("--actions-poll-ms <ms>", "Polling interval while waiting for the question card", parseInteger, 250)
+  .option("--chat-accept-timeout-ms <ms>", "How long to wait for Lovable to accept the answer on the server", parseInteger, 30_000)
+  .option("--no-submit", "Only fill the free-text field; do not click Submit")
+  .action(async (targetUrl, answer, options) => {
+    const profileDir = getProfileDir(options.profileDir);
+    if (options.seedDesktopSession) {
+      await seedDesktopProfileIntoPlaywrightDefault({
+        fromDir: getDesktopProfileDir(options.desktopProfileDir),
+        toDir: profileDir,
+        force: true
+      });
+    }
+
+    const context = await launchLovableContext({
+      profileDir,
+      headless: Boolean(options.headless)
+    });
+
+    try {
+      const page = context.pages()[0] || await context.newPage();
+      const normalizedUrl = normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL);
+      await page.goto(normalizedUrl, { waitUntil: "domcontentloaded" });
+
+      const hasSession = await hasLovableSession(page);
+      if (!hasSession) {
+        throw new Error(
+          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+        );
+      }
+
+      const result = await answerProjectQuestion(page, {
+        projectUrl: normalizedUrl,
+        answer,
+        optionLabel: options.option,
+        submit: Boolean(options.submit),
+        timeoutMs: options.timeoutMs,
+        settleMs: options.settleMs,
+        actionsTimeoutMs: options.actionsTimeoutMs,
+        actionsPollMs: options.actionsPollMs,
+        chatAcceptTimeoutMs: options.chatAcceptTimeoutMs
+      });
+
+      console.log(`Filled question via ${result.fillResult.method} (${result.fillResult.tagName}).`);
+      if (options.submit) {
+        console.log("Submitted the question answer.");
+        if (result.chatAccepted?.ok) {
+          console.log("Lovable accepted the question answer on the server.");
+        } else {
+          const statusSuffix = result.chatAccepted?.status ? ` Last chat status: ${result.chatAccepted.status}.` : "";
+          console.log(`Lovable did not confirm the question answer on the server.${statusSuffix}`);
+        }
+      }
+      printQuestionState(result.stateAfter);
+    } finally {
+      await context.close();
     }
   });
 
@@ -834,6 +1056,10 @@ program
   .option("--fail-on-console", "Treat preview console warnings/errors as blocking during verify", false)
   .option("--expect-text <text>", "Assert that preview body text contains this string", collectValues, [])
   .option("--forbid-text <text>", "Assert that preview body text does not contain this string", collectValues, [])
+  .option("--allow-fragment", "Send a prompt even if it looks truncated or unfinished", false)
+  .option("--answer-question <text>", "If Lovable opens a Questions card after the prompt, answer it with this text")
+  .option("--question-option <label>", "Question option label to target before filling free text", "Other")
+  .option("--question-timeout-ms <ms>", "How long to wait for a delayed Questions card after the prompt", parseInteger, 8_000)
   .option("--wait-after-loop-ms <ms>", "Delay before the browser closes after the loop", parseInteger, 4_000)
   .action(async (targetUrl, prompt, options) => {
     const profileDir = getProfileDir(options.profileDir);
@@ -871,6 +1097,13 @@ program
 
       let currentActions = [];
       if (prompt) {
+        const promptWarnings = assertPromptLooksComplete(prompt, {
+          allowFragment: Boolean(options.allowFragment)
+        });
+        if (promptWarnings.length > 0) {
+          console.log(`Prompt guard bypassed: ${promptWarnings.join(" ")}`);
+        }
+
         const baselineActions = await listChatActions(page, {
           timeoutMs: Math.min(options.waitForActionsMs, 1_000),
           pollMs: options.actionPollMs
@@ -897,11 +1130,44 @@ program
         if (promptTurn.verificationResolved?.reason) {
           console.log(`Verification path: ${promptTurn.verificationResolved.reason}.`);
         }
-        currentActions = await waitForChangedChatActions(page, {
-          previousActions: baselineActions,
-          timeoutMs: options.waitForActionsMs,
-          pollMs: options.actionPollMs
+
+        const questionState = await getProjectQuestionState(page, {
+          timeoutMs: options.questionTimeoutMs,
+          pollMs: 250
         });
+
+        if (questionState.open) {
+          console.log(`Lovable follow-up question: ${questionState.prompt || "(prompt missing)"}`);
+          if (options.answerQuestion) {
+            const answerResult = await answerProjectQuestion(page, {
+              projectUrl: normalizedUrl,
+              answer: options.answerQuestion,
+              optionLabel: options.questionOption
+            });
+            console.log(`Answered question via ${answerResult.fillResult.method} (${answerResult.fillResult.tagName}).`);
+            if (answerResult.chatAccepted?.ok) {
+              console.log("Lovable accepted the question answer on the server.");
+            }
+            currentActions = await waitForChangedChatActions(page, {
+              previousActions: baselineActions,
+              timeoutMs: options.waitForActionsMs,
+              pollMs: options.actionPollMs
+            });
+          } else {
+            if (options.action.length > 0) {
+              throw new Error(
+                "Lovable asked a follow-up question before the requested action(s) could run. Re-run with --answer-question or use question-answer."
+              );
+            }
+            currentActions = [];
+          }
+        } else {
+          currentActions = await waitForChangedChatActions(page, {
+            previousActions: baselineActions,
+            timeoutMs: options.waitForActionsMs,
+            pollMs: options.actionPollMs
+          });
+        }
       } else {
         currentActions = await listChatActions(page, {
           timeoutMs: options.waitForActionsMs,
@@ -1307,6 +1573,47 @@ function capitalize(value) {
   return `${value[0].toUpperCase()}${value.slice(1)}`;
 }
 
+function getPromptFragmentWarnings(prompt) {
+  const trimmed = String(prompt || "").trim();
+  if (!trimmed) {
+    return ["Prompt is empty."];
+  }
+
+  const warnings = [];
+  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const hasListContinuation = lines.slice(1).some((line) => /^([-*•]|\d+[.)])\s+/.test(line));
+
+  if (/[:;]\s*$/.test(trimmed) && lines.length === 1) {
+    warnings.push("The prompt ends with punctuation that suggests missing follow-up details.");
+  }
+
+  if (/\bthe following\b/i.test(trimmed) && !hasListContinuation && lines.length < 2) {
+    warnings.push("The prompt references 'the following' but does not include the actual items.");
+  }
+
+  if (
+    /\blayout issues?\b/i.test(trimmed) &&
+    /\b(following|below|above)\b/i.test(trimmed) &&
+    !hasListContinuation
+  ) {
+    warnings.push("The prompt mentions layout issues but no concrete layout problems were included.");
+  }
+
+  return warnings;
+}
+
+function assertPromptLooksComplete(prompt, {
+  allowFragment = false
+} = {}) {
+  const warnings = getPromptFragmentWarnings(prompt);
+  if (warnings.length > 0 && !allowFragment) {
+    throw new Error(
+      `Prompt looks truncated or unfinished: ${warnings.join(" ")} Re-run with --allow-fragment to send it anyway.`
+    );
+  }
+  return warnings;
+}
+
 function getVerifyVariants({
   desktopOnly = false,
   mobileOnly = false
@@ -1419,6 +1726,25 @@ function printChatActions(actions) {
     const disabledSuffix = action.disabled ? " (disabled)" : "";
     console.log(`[${index}] ${action.label}${disabledSuffix}`);
   });
+}
+
+function printQuestionState(state) {
+  console.log(`Questions card: ${state.open ? "open" : "closed"}`);
+
+  if (!state.open) {
+    return;
+  }
+
+  console.log(`Question: ${state.prompt || "(missing)"}`);
+  console.log(`Mode: ${state.mode || "(unknown)"}`);
+  console.log(
+    `Free-text input: ${state.input?.present ? `yes (${state.input.tagName || "unknown"})` : "no"}`
+  );
+  if (state.input?.present) {
+    console.log(`Input placeholder: ${state.input.placeholder || "(none)"}`);
+    console.log(`Input value: ${state.input.value || "(empty)"}`);
+  }
+  console.log(`Actions: ${state.actions?.map((action) => action.label).join(", ") || "(none)"}`);
 }
 
 function printRuntimeErrorState(state) {

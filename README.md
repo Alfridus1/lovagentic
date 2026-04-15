@@ -175,6 +175,23 @@ npm run start -- findings "https://lovable.dev/projects/your-project" \
   --json
 ```
 
+Read a visible Lovable `Questions` card:
+
+```bash
+npm run start -- questions "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session
+```
+
+Answer the current `Questions` card through its free-text field:
+
+```bash
+npm run start -- question-answer "https://lovable.dev/projects/your-project" \
+  "The hero illustration overflows right, the floating badges overflow on mobile, and the cookie banner overlaps the CTA." \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session
+```
+
 Run a full proposal loop in one command:
 
 ```bash
@@ -222,6 +239,16 @@ npm run start -- prompt "https://lovable.dev/projects/your-project" "Refine the 
   --profile-dir /tmp/lovable-cli-profile \
   --seed-desktop-session \
   --verification-timeout-ms 600000
+```
+
+If the prompt is intentionally incomplete, bypass the prompt guard and optionally wait longer for a delayed follow-up question:
+
+```bash
+npm run start -- prompt "https://lovable.dev/projects/your-project" "Fix the following layout issues on the landing page:" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --allow-fragment \
+  --question-timeout-ms 20000
 ```
 
 Keep the automated browser open after submitting:
@@ -303,13 +330,17 @@ npm run start -- domain "https://lovable.dev/projects/your-project" \
 - `list` reads Lovable's real `/dashboard` page, not the older `/projects` route, and extracts the current workspace, visible workspace menu entries, and the dashboard project feeds.
 - `mode` switches the main Lovable composer between `build` and `plan`.
 - `prompt` uses Playwright and a persistent profile at `~/.lovable-cli/profile` by default.
+- `prompt` now blocks obviously truncated prompts by default and asks you to use `--allow-fragment` if you really want to send them.
 - `prompt --mode plan|build` switches the composer before it types and submits.
+- `questions` reads Lovable's separate follow-up `Questions` card when Lovable asks for clarification instead of continuing immediately.
+- `question-answer` fills the question card's free-text field and submits it through the same project page.
 - `actions` lists visible chat-side buttons near the composer, so agents can see proposal actions like `Approve`, `Skip`, or `Verify it works`.
 - `action` clicks one of those visible chat-side buttons by label, which is the main path for button-driven follow-ups after plan suggestions.
 - `errors` reads Lovable's separate runtime/build error surface, including recovery buttons like `Try to fix` and `Show logs`.
 - `error-action` clicks one of those runtime/build error actions and, for recovery clicks, checks whether Lovable accepted the fix request on the server.
 - `findings` opens the inline `View findings` security pane and extracts the visible scan status, pane actions, counts, and issue table rows.
 - `chat-loop` combines those pieces: it can send a prompt, wait for the relevant action label to appear, click it, and then optionally run preview verification.
+- `prompt --answer-question` and `chat-loop --answer-question` can auto-answer a delayed Lovable `Questions` card, but the follow-up may appear noticeably later than the original chat accept, so tune `--question-timeout-ms` when needed.
 - `prompt` now waits for a real server-side `/chat` accept before it trusts the UI and then confirms persistence with a reload.
 - `prompt --verify` runs the same preview capture path immediately after a persisted prompt.
 - `publish` walks the Lovable publish wizard, waits for the deployment request, and then probes the live URL until it returns success.

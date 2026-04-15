@@ -510,6 +510,455 @@ export async function clickChatAction(page, {
   };
 }
 
+function normalizeQuestionActionLabel(value) {
+  return normalizeText(value)
+    .replace(/:.*$/, "")
+    .replace(/\s+answers?$/i, "");
+}
+
+async function getVisibleQuestionSnapshot(page) {
+  return page.locator("button,[role='button']").evaluateAll((elements) => {
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const isRendered = (element) => {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0;
+    };
+
+    const getActionLabel = (element) => {
+      const text = normalize(element.textContent || "");
+      const ariaLabel = normalize(element.getAttribute("aria-label") || "");
+      const rawLabel = text || ariaLabel;
+      return {
+        label: normalize(rawLabel.replace(/:.*$/, "").replace(/\s+answers?$/i, "")),
+        text,
+        ariaLabel
+      };
+    };
+
+    const submitButton = elements.find((element) => {
+      if (!(element instanceof HTMLElement) || !isRendered(element)) {
+        return false;
+      }
+
+      const { label, text, ariaLabel } = getActionLabel(element);
+      return /^(Submit)$/i.test(label) || /Submit answers/i.test(`${text} ${ariaLabel}`);
+    });
+
+    if (!(submitButton instanceof HTMLElement)) {
+      return {
+        open: false,
+        title: null,
+        prompt: null,
+        mode: null,
+        input: {
+          present: false,
+          tagName: null,
+          placeholder: null,
+          value: null
+        },
+        actions: []
+      };
+    }
+
+    let root = submitButton.closest("div") || submitButton;
+    for (let current = submitButton.parentElement; current; current = current.parentElement) {
+      const texts = Array.from(current.querySelectorAll("span,p"))
+        .map((element) => normalize(element.textContent || ""))
+        .filter(Boolean);
+      if (texts.some((value) => /^Questions$/i.test(value))) {
+        root = current;
+        break;
+      }
+    }
+
+    const prompt = Array.from(root.querySelectorAll("p"))
+      .map((element) => normalize(element.textContent || ""))
+      .find((value) => {
+        return value &&
+          !/^Questions$/i.test(value) &&
+          !/^Select\b/i.test(value) &&
+          !/^(Skip|Submit)$/i.test(value);
+      }) || null;
+
+    const mode = Array.from(root.querySelectorAll("span,p,div"))
+      .map((element) => normalize(element.textContent || ""))
+      .find((value) => /^Select\b/i.test(value)) || null;
+
+    const input = root.querySelector(
+      "[contenteditable='true'][aria-label*='Mention input' i],textarea,input:not([type='button']):not([type='submit']):not([type='radio']):not([type='checkbox'])"
+    );
+    const placeholder = input
+      ? normalize(
+        input.getAttribute("placeholder") ||
+        input.closest("div")?.querySelector("span")?.textContent ||
+        ""
+      )
+      : null;
+    const inputValue = input
+      ? normalize("value" in input ? input.value : input.textContent || "")
+      : null;
+
+    const actions = elements
+      .map((element, domIndex) => {
+        if (!(element instanceof HTMLElement) || !root.contains(element) || !isRendered(element)) {
+          return null;
+        }
+
+        const rect = element.getBoundingClientRect();
+        const { label, text, ariaLabel } = getActionLabel(element);
+        if (!label) {
+          return null;
+        }
+
+        return {
+          domIndex,
+          label,
+          text,
+          ariaLabel,
+          disabled: element.matches("[disabled],[aria-disabled='true'],[data-disabled='true']"),
+          tagName: element.tagName.toLowerCase(),
+          x: Math.round(rect.x),
+          y: Math.round(rect.y)
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        if (left.y !== right.y) {
+          return left.y - right.y;
+        }
+        return left.x - right.x;
+      });
+
+    return {
+      open: true,
+      title: "Questions",
+      prompt,
+      mode,
+      input: {
+        present: Boolean(input),
+        tagName: input ? input.tagName.toLowerCase() : null,
+        placeholder: placeholder || null,
+        value: inputValue
+      },
+      actions
+    };
+  });
+}
+
+export async function getProjectQuestionState(page, {
+  timeoutMs = 2_000,
+  pollMs = 250
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let lastSnapshot = await getVisibleQuestionSnapshot(page);
+
+  while (Date.now() < deadline) {
+    if (lastSnapshot.open) {
+      return lastSnapshot;
+    }
+
+    await page.waitForTimeout(pollMs);
+    lastSnapshot = await getVisibleQuestionSnapshot(page);
+  }
+
+  return lastSnapshot;
+}
+
+export async function listQuestionActions(page, {
+  timeoutMs = 2_000,
+  pollMs = 250
+} = {}) {
+  const state = await getProjectQuestionState(page, {
+    timeoutMs,
+    pollMs
+  });
+
+  return state.actions || [];
+}
+
+export async function clickQuestionAction(page, {
+  label,
+  exact = false,
+  matchIndex = 0,
+  timeoutMs = 15_000,
+  settleMs = 1_500,
+  actionsTimeoutMs = 2_000,
+  actionsPollMs = 250
+}) {
+  const normalizedLabel = normalizeQuestionActionLabel(label).toLowerCase();
+  if (!normalizedLabel) {
+    throw new Error("Expected a non-empty question action label.");
+  }
+
+  const deadline = Date.now() + actionsTimeoutMs;
+  let actions = [];
+  let matches = [];
+  let target = null;
+
+  while (Date.now() < deadline) {
+    actions = await listQuestionActions(page, {
+      timeoutMs: Math.max(actionsPollMs, 250),
+      pollMs: actionsPollMs
+    }).catch(() => []);
+
+    const exactMatches = actions.filter((action) => action.label.toLowerCase() === normalizedLabel);
+    const containsMatches = actions.filter((action) => action.label.toLowerCase().includes(normalizedLabel));
+    matches = exact ? exactMatches : (exactMatches.length > 0 ? exactMatches : containsMatches);
+
+    if (matchIndex >= 0 && matchIndex < matches.length) {
+      target = matches[matchIndex];
+      if (!target.disabled) {
+        break;
+      }
+    }
+
+    if (matches.length > 0 && matchIndex >= matches.length) {
+      break;
+    }
+
+    await page.waitForTimeout(actionsPollMs);
+  }
+
+  if (matches.length === 0) {
+    const visibleActions = actions.map((action) => action.label).join(", ") || "(none)";
+    throw new Error(`No visible question action matched "${label}". Visible actions: ${visibleActions}`);
+  }
+
+  if (matchIndex < 0 || matchIndex >= matches.length) {
+    throw new Error(
+      `Match index ${matchIndex} is out of range for "${label}". Matching question actions: ${matches.map((action) => action.label).join(", ")}`
+    );
+  }
+
+  target = matches[matchIndex];
+  if (target.disabled) {
+    throw new Error(`Question action "${target.label}" is currently disabled.`);
+  }
+
+  const locator = page.locator("button,[role='button']").nth(target.domIndex);
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  try {
+    await locator.click({ timeout: timeoutMs });
+  } catch {
+    await locator.click({ timeout: Math.min(timeoutMs, 5_000), force: true }).catch(async () => {
+      await locator.evaluate((element) => element.click());
+    });
+  }
+
+  await page.waitForTimeout(settleMs);
+
+  return {
+    clicked: target,
+    stateAfterClick: await getProjectQuestionState(page, {
+      timeoutMs: actionsTimeoutMs,
+      pollMs: actionsPollMs
+    }).catch(() => ({
+      open: false,
+      title: null,
+      prompt: null,
+      mode: null,
+      input: {
+        present: false,
+        tagName: null,
+        placeholder: null,
+        value: null
+      },
+      actions: []
+    }))
+  };
+}
+
+function getQuestionPaneLocator(page) {
+  const submitButton = page.getByRole("button", {
+    name: /Submit answers|^Submit$/i
+  }).first();
+
+  return submitButton.locator("xpath=ancestor::div[.//span[normalize-space()='Questions']][1]");
+}
+
+async function fillQuestionInput(page, answer, {
+  optionLabel = "Other",
+  timeoutMs = 15_000
+} = {}) {
+  const pane = getQuestionPaneLocator(page);
+  await pane.waitFor({
+    state: "visible",
+    timeout: timeoutMs
+  });
+
+  const option = pane.getByText(new RegExp(`^${escapeRegExp(optionLabel)}$`, "i")).first();
+  if (await option.isVisible().catch(() => false)) {
+    await option.click().catch(() => {});
+  }
+
+  const editable = pane.locator(
+    "[contenteditable='true'][aria-label*='Mention input' i],textarea,input:not([type='button']):not([type='submit']):not([type='radio']):not([type='checkbox'])"
+  ).first();
+  await editable.waitFor({
+    state: "visible",
+    timeout: timeoutMs
+  });
+
+  const tagName = await editable.evaluate((element) => element.tagName.toLowerCase());
+  await editable.click();
+
+  if (tagName === "textarea" || tagName === "input") {
+    await editable.fill(answer);
+    return {
+      tagName,
+      method: "fill"
+    };
+  }
+
+  const modifier = process.platform === "darwin" ? "Meta" : "Control";
+  await page.keyboard.press(`${modifier}+A`);
+  await page.keyboard.type(answer, { delay: 8 });
+
+  return {
+    tagName,
+    method: "keyboard"
+  };
+}
+
+async function submitQuestionPane(page, {
+  timeoutMs = 15_000
+} = {}) {
+  const pane = getQuestionPaneLocator(page);
+  await pane.waitFor({
+    state: "visible",
+    timeout: timeoutMs
+  });
+
+  const submitButton = pane.getByRole("button", {
+    name: /Submit answers|^Submit$/i
+  }).first();
+  await submitButton.waitFor({
+    state: "visible",
+    timeout: timeoutMs
+  });
+
+  try {
+    await submitButton.click({ timeout: timeoutMs });
+  } catch {
+    await submitButton.click({ timeout: Math.min(timeoutMs, 5_000), force: true }).catch(async () => {
+      await submitButton.evaluate((element) => element.click());
+    });
+  }
+}
+
+export async function answerProjectQuestion(page, {
+  projectUrl,
+  answer,
+  optionLabel = "Other",
+  submit = true,
+  timeoutMs = 15_000,
+  settleMs = 1_500,
+  actionsTimeoutMs = 2_000,
+  actionsPollMs = 250,
+  chatAcceptTimeoutMs = 30_000
+} = {}) {
+  if (!normalizeText(answer)) {
+    throw new Error("Expected a non-empty question answer.");
+  }
+
+  const questionState = await getProjectQuestionState(page, {
+    timeoutMs: actionsTimeoutMs,
+    pollMs: actionsPollMs
+  });
+
+  if (!questionState.open) {
+    throw new Error("No visible Lovable question card is open on this page.");
+  }
+
+  if (!questionState.input?.present) {
+    throw new Error(
+      "The current Lovable question does not expose a free-text answer field. Use question-action instead."
+    );
+  }
+
+  const fillResult = await fillQuestionInput(page, answer, {
+    optionLabel,
+    timeoutMs
+  });
+
+  let submitResult = null;
+  let chatAccepted = null;
+
+  if (submit) {
+    const acceptancePromise = waitForChatAcceptance(page, {
+      projectUrl,
+      timeoutMs: chatAcceptTimeoutMs
+    }).catch(() => ({
+      ok: false,
+      reason: "timeout",
+      status: null
+    }));
+
+    try {
+      await submitQuestionPane(page, {
+        timeoutMs
+      });
+      await page.waitForTimeout(settleMs);
+      chatAccepted = await acceptancePromise;
+    } catch (error) {
+      const stateAfterFill = await getProjectQuestionState(page, {
+        timeoutMs: actionsTimeoutMs,
+        pollMs: actionsPollMs
+      }).catch(() => ({
+        open: false,
+        title: null,
+        prompt: null,
+        mode: null,
+        input: {
+          present: false,
+          tagName: null,
+          placeholder: null,
+          value: null
+        },
+        actions: []
+      }));
+
+      if (stateAfterFill.open) {
+        throw error;
+      }
+
+      submitResult = null;
+      chatAccepted = await acceptancePromise;
+    }
+  }
+
+  return {
+    fillResult,
+    submitResult,
+    chatAccepted,
+    stateAfter: await getProjectQuestionState(page, {
+      timeoutMs: actionsTimeoutMs,
+      pollMs: actionsPollMs
+    }).catch(() => ({
+      open: false,
+      title: null,
+      prompt: null,
+      mode: null,
+      input: {
+        present: false,
+        tagName: null,
+        placeholder: null,
+        value: null
+      },
+      actions: []
+    }))
+  };
+}
+
 function normalizeRuntimeErrorActionLabel(value) {
   return normalizeText(value).replace(/([a-z])([A-Z])$/, "$1");
 }
