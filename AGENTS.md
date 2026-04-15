@@ -112,6 +112,7 @@ For prompt regression checks:
 - `build` and `plan` composer mode switching
 - preview verification with screenshots, console checks, text assertions, and layout heuristics
 - publish to the default `.lovable.app` URL
+- redeploy already-published projects through the `Update` button when Lovable shows pending changes
 - live-site verification after publish
 - published `Edit settings` automation for:
   - visibility inspection

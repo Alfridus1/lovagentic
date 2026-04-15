@@ -225,6 +225,7 @@ npm run start -- domain "https://lovable.dev/projects/your-project" \
 - `prompt --verify` runs the same preview capture path immediately after a persisted prompt.
 - `publish` walks the Lovable publish wizard, waits for the deployment request, and then probes the live URL until it returns success.
 - `publish` currently follows the default Lovable publish path: suggested `.lovable.app` subdomain and the default visibility selection shown in the wizard.
+- `publish` now also handles already-published projects that show `Update` instead of `Publish`, and waits for that redeploy to complete.
 - `publish-settings` automates the published project's `Edit settings` surface, including the nested `Save changes` step that Lovable requires after closing the `Website info` or `Visibility` submenus.
 - `domain` inspects the `/settings/domains` page and can update the default `.lovable.app` slug by driving the `Edit URL` dialog.
 - If the website info step is empty, Lovable may auto-edit `index.html` with default title/description metadata before it deploys. The CLI reports when that happens.

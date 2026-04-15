@@ -1380,6 +1380,7 @@ export async function getPublishSurfaceState(page, {
     liveUrl,
     canContinue: buttonLabels.some((label) => /^Continue$/i.test(label)),
     canPublish: buttonLabels.some((label) => /^Publish$/i.test(label)),
+    canUpdate: buttonLabels.some((label) => /^Update$/i.test(label)),
     isPublishing: buttonLabels.some((label) => /^Publishing$/i.test(label)) || /\bPublishing\b/i.test(snapshot.text)
   };
 }
@@ -1529,7 +1530,7 @@ export async function publishProject(page, {
   });
   const stepHistory = [summarizePublishState(state)];
 
-  if (state.step === "published") {
+  if (state.step === "published" && !state.canUpdate) {
     const liveCheck = state.liveUrl
       ? await probeUrlStatus(state.liveUrl)
       : null;
@@ -1572,7 +1573,7 @@ export async function publishProject(page, {
     stepHistory.push(summarizePublishState(state));
   }
 
-  if (state.step === "published") {
+  if (state.step === "published" && !state.canUpdate) {
     return {
       ok: true,
       alreadyPublished: true,
@@ -1586,8 +1587,10 @@ export async function publishProject(page, {
     };
   }
 
-  if (state.step !== "review") {
-    throw new Error(`Lovable publish wizard never reached the review step. Current step: ${state.step}.`);
+  const isUpdateFlow = state.step === "published" && state.canUpdate;
+
+  if (!isUpdateFlow && state.step !== "review") {
+    throw new Error(`Lovable publish flow is not ready. Current step: ${state.step}.`);
   }
 
   const publishEvents = [];
@@ -1634,7 +1637,9 @@ export async function publishProject(page, {
   page.on("response", onResponse);
 
   try {
-    await clickPublishSurfaceButton(page, "Publish", {
+    const triggerLabel = isUpdateFlow ? "Update" : "Publish";
+
+    await clickPublishSurfaceButton(page, triggerLabel, {
       timeoutMs: stepTimeoutMs
     });
 
@@ -1645,7 +1650,12 @@ export async function publishProject(page, {
         state = currentState;
       }
 
-      if (state?.isPublishing || state?.step === "published" || publishEvents.some((event) => event.kind === "deployment_create")) {
+      if (
+        state?.isPublishing ||
+        publishEvents.some((event) => event.kind === "deployment_create") ||
+        (isUpdateFlow && currentState && !currentState.canUpdate) ||
+        (!isUpdateFlow && state?.step === "published")
+      ) {
         break;
       }
 
@@ -1681,6 +1691,7 @@ export async function publishProject(page, {
     return {
       ok: true,
       alreadyPublished: false,
+      updatedExisting: isUpdateFlow,
       liveUrl: intendedLiveUrl,
       liveCheck,
       state,

@@ -530,6 +530,8 @@ program
 
       if (result.alreadyPublished) {
         console.log("Project is already published.");
+      } else if (result.updatedExisting) {
+        console.log("Lovable updated the published site.");
       } else {
         console.log("Lovable completed the publish flow.");
         if (result.siteInfoUpdated) {
