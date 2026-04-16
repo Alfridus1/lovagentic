@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`lovable-cli` is a local prototype for steering Lovable through stable, user-owned surfaces:
+`lovagentic` is a local prototype for steering Lovable through stable, user-owned surfaces:
 
 - official Lovable URLs for project creation
 - Playwright browser automation against `https://lovable.dev`
@@ -12,7 +12,7 @@ Do not treat this repo as a private desktop reverse-engineering client. The desi
 
 Repo-local OpenClaw skill:
 
-- [skills/lovable-cli/SKILL.md](/Users/tobik/Documents/Playground/lovable-cli/skills/lovable-cli/SKILL.md)
+- [skills/lovagentic/SKILL.md](/Users/tobik/Documents/Playground/lovagentic/skills/lovagentic/SKILL.md)
 
 ## Operating Model
 
@@ -108,7 +108,7 @@ Prefer throwaway Lovable projects for automation work.
 Recommended profile pattern:
 
 ```bash
---profile-dir /tmp/lovable-cli-<task-name>
+--profile-dir /tmp/lovagentic-<task-name>
 ```
 
 Recommended session pattern:

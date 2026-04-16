@@ -2,7 +2,7 @@
 
 ## Scope
 
-`lovable-cli` deliberately stays on stable, user-owned surfaces:
+`lovagentic` deliberately stays on stable, user-owned surfaces:
 
 - official Lovable URLs
 - browser automation against the web UI

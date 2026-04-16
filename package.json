@@ -1,31 +1,42 @@
 {
-  "name": "lovable-cli",
+  "name": "lovagentic",
   "version": "0.1.0",
-  "private": true,
-  "description": "Browser-first CLI for steering Lovable through stable, user-owned surfaces.",
+  "description": "Agentic CLI for Lovable.dev \u2014 agents in, apps out. Send prompts, verify builds, fix errors, and publish from the terminal.",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "author": "Tobias Kub <tobias@coppen.energy>",
+  "homepage": "https://lovagentic.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Alfridus1/lovable-cli.git"
+    "url": "https://github.com/Alfridus1/lovagentic.git"
   },
   "bugs": {
-    "url": "https://github.com/Alfridus1/lovable-cli/issues"
+    "url": "https://github.com/Alfridus1/lovagentic/issues"
   },
-  "homepage": "https://github.com/Alfridus1/lovable-cli#readme",
   "keywords": [
     "lovable",
+    "lovable.dev",
     "cli",
+    "agent",
+    "agentic",
     "playwright",
     "automation",
-    "mcp"
+    "codegen",
+    "ai-agents"
   ],
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "lovable-cli": "./src/cli.js"
+    "lovagentic": "./src/cli.js"
   },
+  "files": [
+    "src",
+    "skills",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "start": "node ./src/cli.js",
     "help": "node ./src/cli.js --help",

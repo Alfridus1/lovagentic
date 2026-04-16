@@ -1,6 +1,6 @@
-# lovable-cli
+# lovagentic
 
-`lovable-cli` is a browser-first operator CLI for steering [Lovable](https://lovable.dev) through stable, user-owned surfaces.
+`lovagentic` is a browser-first operator CLI for steering [Lovable](https://lovable.dev) through stable, user-owned surfaces.
 
 It focuses on:
 
@@ -69,7 +69,7 @@ test/
   *.test.js           Focused regression tests for orchestration and browser helpers
 
 skills/
-  lovable-cli/        Repo-local OpenClaw skill
+  lovagentic/        Repo-local OpenClaw skill
 ```
 
 Supporting docs:
@@ -127,7 +127,7 @@ Wait until Lovable is really idle:
 
 ```bash
 npm run start -- wait-for-idle "https://lovable.dev/projects/your-project" \
-  --profile-dir /tmp/lovable-cli-profile \
+  --profile-dir /tmp/lovagentic-profile \
   --seed-desktop-session \
   --headless \
   --json
@@ -137,7 +137,7 @@ Verify the preview:
 
 ```bash
 npm run start -- verify "https://lovable.dev/projects/your-project" \
-  --profile-dir /tmp/lovable-cli-profile \
+  --profile-dir /tmp/lovagentic-profile \
   --seed-desktop-session
 ```
 
@@ -207,13 +207,13 @@ Run `npm run help` or `npm run start -- --help` for the full command list.
 
 ```bash
 npm run start -- create "Build a simple static smoke page with one heading and one CTA" \
-  --profile-dir /tmp/lovable-cli-smoke \
+  --profile-dir /tmp/lovagentic-smoke \
   --seed-desktop-session \
   --workspace "Tobi's Lovable" \
   --headless
 
 npm run start -- publish "https://lovable.dev/projects/your-project" \
-  --profile-dir /tmp/lovable-cli-smoke \
+  --profile-dir /tmp/lovagentic-smoke \
   --seed-desktop-session \
   --headless
 ```
@@ -225,7 +225,7 @@ Large prompts are auto-split by default:
 ```bash
 npm run start -- prompt "https://lovable.dev/projects/your-project" \
   "$(cat ./long-prompt.txt)" \
-  --profile-dir /tmp/lovable-cli-profile \
+  --profile-dir /tmp/lovagentic-profile \
   --seed-desktop-session \
   --mode plan
 ```
@@ -237,7 +237,7 @@ If you deliberately keep a large prompt in a single Lovable turn with `--no-auto
 ```bash
 npm run start -- chat-loop "https://lovable.dev/projects/your-project" \
   "Outline the next changes before touching code." \
-  --profile-dir /tmp/lovable-cli-profile \
+  --profile-dir /tmp/lovagentic-profile \
   --seed-desktop-session \
   --mode plan \
   --action "Approve"
@@ -248,7 +248,7 @@ npm run start -- chat-loop "https://lovable.dev/projects/your-project" \
 ```bash
 npm run start -- prompt "https://lovable.dev/projects/your-project" \
   "Add a testimonials section." \
-  --profile-dir /tmp/lovable-cli-profile \
+  --profile-dir /tmp/lovagentic-profile \
   --seed-desktop-session \
   --verify \
   --expect-text "Testimonials" \
@@ -257,7 +257,7 @@ npm run start -- prompt "https://lovable.dev/projects/your-project" \
 
 ## Safety model
 
-`lovable-cli` is intentionally conservative:
+`lovagentic` is intentionally conservative:
 
 - it prefers browser-observable state over guessed internal APIs
 - it checks for server-side chat acceptance where possible
@@ -268,7 +268,7 @@ npm run start -- prompt "https://lovable.dev/projects/your-project" \
 Recommended testing pattern:
 
 ```bash
---profile-dir /tmp/lovable-cli-<task-name>
+--profile-dir /tmp/lovagentic-<task-name>
 --seed-desktop-session
 ```
 
@@ -325,5 +325,5 @@ When extending this repo:
 ## Related files
 
 - [AGENTS.md](./AGENTS.md)
-- [skills/lovable-cli/SKILL.md](./skills/lovable-cli/SKILL.md)
+- [skills/lovagentic/SKILL.md](./skills/lovagentic/SKILL.md)
 - [docs/commands.md](./docs/commands.md)

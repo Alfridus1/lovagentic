@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 
 export const DEFAULT_BASE_URL = process.env.LOVABLE_BASE_URL?.trim() || "https://lovable.dev";
-export const DEFAULT_PROFILE_DIR = path.join(os.homedir(), ".lovable-cli", "profile");
+export const DEFAULT_PROFILE_DIR = path.join(os.homedir(), ".lovagentic", "profile");
 export const DEFAULT_DESKTOP_PROFILE_DIR = path.join(
   os.homedir(),
   "Library",

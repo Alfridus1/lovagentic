@@ -74,7 +74,7 @@ import { buildCreateUrl, normalizeTargetUrl } from "./url.js";
 const program = new Command();
 
 program
-  .name("lovable-cli")
+  .name("lovagentic")
   .description("Prototype CLI for steering Lovable from the local machine.")
   .version("0.1.0");
 
@@ -215,7 +215,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -289,7 +289,7 @@ program
         const signedIn = await ensureSignedIn(page);
         if (!signedIn) {
           throw new Error(
-            `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+            `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
           );
         }
 
@@ -357,7 +357,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -440,7 +440,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -562,7 +562,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -623,7 +623,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -690,7 +690,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -748,7 +748,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -808,7 +808,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -874,7 +874,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -933,7 +933,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -1014,7 +1014,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -1113,7 +1113,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -1292,7 +1292,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -1393,7 +1393,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -2095,7 +2095,7 @@ program
       const hasSession = await hasLovableSession(page);
       if (!hasSession) {
         throw new Error(
-          `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+          `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
         );
       }
 
@@ -2161,7 +2161,7 @@ async function withProjectPageSession(targetUrl, options, callback) {
     const hasSession = await hasLovableSession(page);
     if (!hasSession) {
       throw new Error(
-        `No Lovable session found in ${profileDir}. Run "lovable-cli login" or "lovable-cli import-desktop-session" first.`
+        `No Lovable session found in ${profileDir}. Run "lovagentic login" or "lovagentic import-desktop-session" first.`
       );
     }
 

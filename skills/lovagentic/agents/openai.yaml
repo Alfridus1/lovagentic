@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lovable CLI"
+  short_description: "Drive Lovable projects via the local CLI"
+  default_prompt: "Use $lovagentic to operate a Lovable project in this repo through prompt, actions, errors, findings, verify, or publish flows."

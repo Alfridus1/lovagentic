@@ -7,7 +7,7 @@ This file is generated from `node ./src/cli.js --help`. Do not edit it manually.
 ## Root help
 
 ```text
-Usage: lovable-cli [options] [command]
+Usage: lovagentic [options] [command]
 
 Prototype CLI for steering Lovable from the local machine.
 
@@ -83,7 +83,7 @@ Commands:
 ## doctor
 
 ```text
-Usage: lovable-cli doctor [options]
+Usage: lovagentic doctor [options]
 
 Inspect the local Lovable desktop install and CLI profile.
 
@@ -96,7 +96,7 @@ Options:
 ## import-desktop-session
 
 ```text
-Usage: lovable-cli import-desktop-session [options]
+Usage: lovagentic import-desktop-session [options]
 
 Copy the desktop app session files into the CLI browser profile.
 
@@ -111,7 +111,7 @@ Options:
 ## login
 
 ```text
-Usage: lovable-cli login [options]
+Usage: lovagentic login [options]
 
 Open a persistent browser profile and wait for a Lovable session.
 
@@ -128,7 +128,7 @@ Options:
 ## list
 
 ```text
-Usage: lovable-cli list [options]
+Usage: lovagentic list [options]
 
 List Lovable dashboard projects plus the visible workspace menu entries.
 
@@ -157,7 +157,7 @@ Options:
 ## create
 
 ```text
-Usage: lovable-cli create [options] <prompt>
+Usage: lovagentic create [options] <prompt>
 
 Generate a Lovable Build-with-URL link and optionally open it.
 
@@ -188,7 +188,7 @@ Options:
 ## mode
 
 ```text
-Usage: lovable-cli mode [options] <target-url> <mode>
+Usage: lovagentic mode [options] <target-url> <mode>
 
 Switch the Lovable composer between Build and Plan.
 
@@ -211,7 +211,7 @@ Options:
 ## prompt
 
 ```text
-Usage: lovable-cli prompt [options] <target-url> <prompt>
+Usage: lovagentic prompt [options] <target-url> <prompt>
 
 Open a Lovable project page in a persistent browser and submit a prompt.
 
@@ -279,7 +279,7 @@ Options:
 ## actions
 
 ```text
-Usage: lovable-cli actions [options] <target-url>
+Usage: lovagentic actions [options] <target-url>
 
 List visible chat-side Lovable actions near the composer, such as plan
 approvals.
@@ -305,7 +305,7 @@ Options:
 ## action
 
 ```text
-Usage: lovable-cli action [options] <target-url> <label>
+Usage: lovagentic action [options] <target-url> <label>
 
 Click a visible chat-side Lovable action button, such as Approve or Verify it
 works.
@@ -341,7 +341,7 @@ Options:
 ## questions
 
 ```text
-Usage: lovable-cli questions [options] <target-url>
+Usage: lovagentic questions [options] <target-url>
 
 Read the visible Lovable Questions card, including its current prompt and
 footer actions.
@@ -368,7 +368,7 @@ Options:
 ## question-action
 
 ```text
-Usage: lovable-cli question-action [options] <target-url> <label>
+Usage: lovagentic question-action [options] <target-url> <label>
 
 Click a visible Lovable Questions-card action, such as Skip, Submit, or Next
 question.
@@ -402,7 +402,7 @@ Options:
 ## question-answer
 
 ```text
-Usage: lovable-cli question-answer [options] <target-url> <answer>
+Usage: lovagentic question-answer [options] <target-url> <answer>
 
 Fill the visible Lovable Questions-card free-text field and optionally submit
 it.
@@ -438,7 +438,7 @@ Options:
 ## errors
 
 ```text
-Usage: lovable-cli errors [options] <target-url>
+Usage: lovagentic errors [options] <target-url>
 
 Read the visible Lovable runtime/build error surface, including Try to fix and
 Show logs.
@@ -465,7 +465,7 @@ Options:
 ## error-action
 
 ```text
-Usage: lovable-cli error-action [options] <target-url> <label>
+Usage: lovagentic error-action [options] <target-url> <label>
 
 Click a visible Lovable runtime/build error action, such as Try to fix or Show
 logs.
@@ -504,7 +504,7 @@ Options:
 ## findings
 
 ```text
-Usage: lovable-cli findings [options] <target-url>
+Usage: lovagentic findings [options] <target-url>
 
 Open Lovable's inline Security findings pane and extract the visible issues.
 
@@ -540,7 +540,7 @@ Options:
 ## chat-loop
 
 ```text
-Usage: lovable-cli chat-loop [options] <target-url> [prompt]
+Usage: lovagentic chat-loop [options] <target-url> [prompt]
 
 Optionally send a prompt, then list and click visible Lovable chat-side
 actions, and optionally verify.
@@ -622,7 +622,7 @@ Options:
 ## publish
 
 ```text
-Usage: lovable-cli publish [options] <target-url>
+Usage: lovagentic publish [options] <target-url>
 
 Publish a Lovable project and wait for the live URL to respond.
 
@@ -666,7 +666,7 @@ Options:
 ## publish-settings
 
 ```text
-Usage: lovable-cli publish-settings [options] <target-url>
+Usage: lovagentic publish-settings [options] <target-url>
 
 Inspect or update published visibility and website info.
 
@@ -692,7 +692,7 @@ Options:
 ## domain
 
 ```text
-Usage: lovable-cli domain [options] <target-url>
+Usage: lovagentic domain [options] <target-url>
 
 Inspect or update the published project domain settings.
 
@@ -724,7 +724,7 @@ Options:
 ## toolbar
 
 ```text
-Usage: lovable-cli toolbar [options] <target-url>
+Usage: lovagentic toolbar [options] <target-url>
 
 Inspect visible project toolbar buttons and optionally open their menus.
 
@@ -749,7 +749,7 @@ Options:
 ## project-settings
 
 ```text
-Usage: lovable-cli project-settings [options] <target-url>
+Usage: lovagentic project-settings [options] <target-url>
 
 Inspect or update low-risk project settings like visibility, category, badge
 visibility, analytics, and rename.
@@ -779,7 +779,7 @@ Options:
 ## knowledge
 
 ```text
-Usage: lovable-cli knowledge [options] <target-url>
+Usage: lovagentic knowledge [options] <target-url>
 
 Inspect or update project and workspace knowledge.
 
@@ -804,7 +804,7 @@ Options:
 ## workspace
 
 ```text
-Usage: lovable-cli workspace [options] <target-url>
+Usage: lovagentic workspace [options] <target-url>
 
 Inspect workspace and account settings surfaces without mutating them.
 
@@ -829,7 +829,7 @@ Options:
 ## git
 
 ```text
-Usage: lovable-cli git [options] <target-url>
+Usage: lovagentic git [options] <target-url>
 
 Inspect or manage the project's Git/GitHub connection.
 
@@ -859,7 +859,7 @@ Options:
 ## code
 
 ```text
-Usage: lovable-cli code [options] <target-url>
+Usage: lovagentic code [options] <target-url>
 
 Read the connected GitHub repository as a pragmatic Code-surface fallback.
 
@@ -889,7 +889,7 @@ Options:
 ## wait-for-idle
 
 ```text
-Usage: lovable-cli wait-for-idle [options] <target-url>
+Usage: lovagentic wait-for-idle [options] <target-url>
 
 Wait until Lovable is idle: no Thinking state, no paused queue, no open
 questions, and no visible runtime error.
@@ -917,7 +917,7 @@ Options:
 ## speed
 
 ```text
-Usage: lovable-cli speed [options] <target-url>
+Usage: lovagentic speed [options] <target-url>
 
 Run Lighthouse against the current project preview as a pragmatic Speed-surface
 fallback.
@@ -950,7 +950,7 @@ Options:
 ## fidelity-loop
 
 ```text
-Usage: lovable-cli fidelity-loop [options] <target-url> [prompt]
+Usage: lovagentic fidelity-loop [options] <target-url> [prompt]
 
 Iteratively prompt, wait for idle, verify expectations, and send follow-up
 prompts for remaining gaps.
@@ -1006,7 +1006,7 @@ Options:
 ## verify
 
 ```text
-Usage: lovable-cli verify [options] <target-url>
+Usage: lovagentic verify [options] <target-url>
 
 Capture desktop and mobile screenshots of the live project preview.
 

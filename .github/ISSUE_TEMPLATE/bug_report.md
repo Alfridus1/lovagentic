@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a reproducible problem in lovable-cli
+about: Report a reproducible problem in lovagentic
 title: "[bug] "
 labels: bug
 assignees: ""
@@ -26,7 +26,7 @@ What happened instead?
 
 ## Environment
 
-- lovable-cli version / commit:
+- lovagentic version / commit:
 - macOS / Linux version:
 - Headed or headless:
 - Session source (`login`, `import-desktop-session`, `--seed-desktop-session`):

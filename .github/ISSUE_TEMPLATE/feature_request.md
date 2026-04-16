@@ -14,7 +14,7 @@ What workflow is missing or too painful today?
 
 Describe the command, flags, or behavior you want.
 
-## Why it belongs in lovable-cli
+## Why it belongs in lovagentic
 
 Explain why this should live in the CLI rather than in Lovable itself or a one-off script.
 
