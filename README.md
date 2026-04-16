@@ -77,6 +77,9 @@ Supporting docs:
 - [AGENTS.md](./AGENTS.md) for agent-oriented operating guidance
 - [CONTRIBUTING.md](./CONTRIBUTING.md) for contributor workflow
 - [SECURITY.md](./SECURITY.md) for secret-handling and reporting expectations
+- [CHANGELOG.md](./CHANGELOG.md) for release history
+- [docs/commands.md](./docs/commands.md) for the generated CLI reference
+- [docs/releases.md](./docs/releases.md) for the release process
 
 ## Requirements
 
@@ -299,12 +302,15 @@ Core scripts:
 | --- | --- |
 | `npm run help` | Show CLI help |
 | `npm run doctor` | Run the `doctor` command |
+| `npm run generate:commands` | Regenerate the command reference |
+| `npm run check:commands` | Ensure the generated command reference is up to date |
 | `npm test` | Run regression tests |
 | `npm run check:syntax` | Run `node --check` on all source files |
 | `npm run check` | Run syntax checks and tests |
 | `npm run ci` | CI-equivalent local check |
 
 GitHub Actions CI runs `npm ci`, installs Playwright Chromium, and executes `npm run check`.
+Dependabot keeps npm and GitHub Actions dependencies moving weekly.
 
 ## Design constraints
 
@@ -320,3 +326,4 @@ When extending this repo:
 
 - [AGENTS.md](./AGENTS.md)
 - [skills/lovable-cli/SKILL.md](./skills/lovable-cli/SKILL.md)
+- [docs/commands.md](./docs/commands.md)

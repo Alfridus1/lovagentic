@@ -26,6 +26,7 @@ npx playwright install chromium
 ```bash
 npm run help
 npm run doctor
+npm run generate:commands
 npm test
 npm run check
 ```
@@ -38,6 +39,7 @@ npm run check
 - Verify persistence after reload for any write operation.
 - Distinguish UI-local state from server-persisted state.
 - Update `README.md` when user-facing behavior changes.
+- Regenerate `docs/commands.md` when command output changes.
 - Add or update regression tests for orchestration, prompt handling, or selector logic.
 
 ## Manual verification expectations

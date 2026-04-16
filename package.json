@@ -30,9 +30,11 @@
     "start": "node ./src/cli.js",
     "help": "node ./src/cli.js --help",
     "doctor": "node ./src/cli.js doctor",
+    "generate:commands": "node ./scripts/generate-command-reference.mjs",
+    "check:commands": "npm run generate:commands && git diff --exit-code -- docs/commands.md",
     "test": "node --test ./test/browser.idle.test.js ./test/browser.multiline.test.js ./test/orchestration.test.js",
     "check:syntax": "node --check ./src/browser.js && node --check ./src/cli.js && node --check ./src/config.js && node --check ./src/orchestration.js && node --check ./src/profile.js && node --check ./src/url.js",
-    "check": "npm run check:syntax && npm test",
+    "check": "npm run check:syntax && npm test && npm run check:commands",
     "ci": "npm run check"
   },
   "dependencies": {
