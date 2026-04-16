@@ -25,6 +25,11 @@ This repository is production-minded, but still pragmatic:
 
 If Lovable or Cloudflare triggers an interactive verification, headed runs are still the reliable path.
 
+[![CI](https://github.com/Alfridus1/lovagentic/actions/workflows/ci.yml/badge.svg)](https://github.com/Alfridus1/lovagentic/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/lovagentic.svg?color=blue)](https://www.npmjs.com/package/lovagentic)
+[![license](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![node](https://img.shields.io/node/v/lovagentic.svg?color=brightgreen)](./package.json)
+
 ## Roadmap
 
 | Version | Status | What changes |

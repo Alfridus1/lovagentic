@@ -80,27 +80,105 @@ program
 
 program
   .command("doctor")
-  .description("Inspect the local Lovable desktop install and CLI profile.")
+  .description("Inspect the local Lovable desktop install, CLI profile, Node, and Playwright.")
   .option("--profile-dir <path>", "Override the CLI browser profile path")
   .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
+  .option("--json", "Print machine-readable JSON", false)
   .action(async (options) => {
     const profileDir = getProfileDir(options.profileDir);
     const desktopProfileDir = getDesktopProfileDir(options.desktopProfileDir);
     const playwrightDefaultDir = getPlaywrightDefaultProfileDir(profileDir);
 
+    // --- Filesystem / session ---
     const desktopAppInstalled = await pathExists(DEFAULT_DESKTOP_APP_PATH);
     const desktopProfileExists = await pathExists(desktopProfileDir);
     const cliProfileExists = await pathExists(profileDir);
     const cliCookieFileExists = await pathExists(`${playwrightDefaultDir}/Cookies`);
     const desktopCookieFileExists = await pathExists(`${desktopProfileDir}/Cookies`);
 
-    console.log(`Lovable.app: ${desktopAppInstalled ? "found" : "missing"} (${DEFAULT_DESKTOP_APP_PATH})`);
-    console.log(`Desktop profile: ${desktopProfileExists ? "found" : "missing"} (${desktopProfileDir})`);
-    console.log(`Desktop cookies: ${desktopCookieFileExists ? "present" : "missing"}`);
-    console.log(`CLI profile: ${cliProfileExists ? "found" : "missing"} (${profileDir})`);
-    console.log(`CLI Playwright Default: ${playwrightDefaultDir}`);
-    console.log(`CLI cookies: ${cliCookieFileExists ? "present" : "missing"}`);
+    // --- Node version ---
+    const nodeMajor = Number(process.versions.node.split(".")[0] || 0);
+    const nodeOk = nodeMajor >= 20;
+
+    // --- Playwright package + chromium binary ---
+    const pwStatus = await detectPlaywright();
+
+    // --- MCP backend readiness ---
+    const mcpConfigured = Boolean(process.env.LOVABLE_MCP_URL);
+
+    const checks = [
+      { key: "node", label: `Node.js ${process.version}`, ok: nodeOk, hint: nodeOk ? null : "lovagentic requires Node 20+. Upgrade Node before continuing." },
+      { key: "desktopApp", label: `Lovable.app (${DEFAULT_DESKTOP_APP_PATH})`, ok: desktopAppInstalled, hint: desktopAppInstalled ? null : "Lovable desktop app not installed. Download from https://lovable.dev/download — required to seed a session." },
+      { key: "desktopProfile", label: `Desktop profile (${desktopProfileDir})`, ok: desktopProfileExists, hint: desktopProfileExists ? null : "Launch Lovable.app at least once and sign in before running lovagentic." },
+      { key: "desktopCookies", label: "Desktop cookies", ok: desktopCookieFileExists, hint: desktopCookieFileExists ? null : "No Lovable session found in the desktop profile. Sign in to Lovable.app first." },
+      { key: "cliProfile", label: `CLI profile (${profileDir})`, ok: cliProfileExists, hint: cliProfileExists ? null : "Run `lovagentic login` or `lovagentic import-desktop-session` to create the CLI profile." },
+      { key: "cliCookies", label: "CLI cookies", ok: cliCookieFileExists, hint: cliCookieFileExists ? null : "CLI profile has no session. Run `lovagentic import-desktop-session` to copy your desktop session." },
+      { key: "playwright", label: `Playwright (${pwStatus.version ?? "not installed"})`, ok: pwStatus.installed, hint: pwStatus.installed ? null : "Run `npm install` in the lovagentic repo, or install the npm package." },
+      { key: "chromium", label: "Playwright Chromium binary", ok: pwStatus.chromium, hint: pwStatus.chromium ? null : "Run `npx playwright install chromium` to download the browser." },
+      { key: "mcp", label: `MCP backend (${mcpConfigured ? "configured" : "not configured"})`, ok: true, hint: mcpConfigured ? null : "LOVABLE_MCP_URL not set. Using browser backend. MCP support ships in v0.2." }
+    ];
+
+    const failed = checks.filter((c) => !c.ok);
+
+    if (options.json) {
+      console.log(JSON.stringify({
+        ok: failed.length === 0,
+        failed: failed.map((c) => c.key),
+        checks,
+        paths: { profileDir, desktopProfileDir, playwrightDefaultDir },
+        node: process.version,
+        mcpConfigured
+      }, null, 2));
+    } else {
+      for (const c of checks) {
+        const mark = c.ok ? "\u2713" : "\u2717";
+        console.log(`${mark} ${c.label}`);
+      }
+      const hints = checks.filter((c) => c.hint);
+      if (hints.length > 0) {
+        console.log("");
+        console.log("Notes:");
+        for (const c of hints) {
+          console.log(`  - ${c.hint}`);
+        }
+      }
+    }
+
+    if (failed.length > 0) {
+      process.exitCode = 1;
+    }
   });
+
+async function detectPlaywright() {
+  let version = null;
+  let installed = false;
+  let chromium = false;
+  try {
+    const mod = await import("playwright");
+    installed = true;
+    // Best-effort version detection from node_modules/playwright/package.json.
+    try {
+      const { createRequire } = await import("node:module");
+      const require = createRequire(import.meta.url);
+      const pkgPath = require.resolve("playwright/package.json");
+      const pkg = JSON.parse(await fs.readFile(pkgPath, "utf8"));
+      version = pkg?.version ?? "installed";
+    } catch {
+      version = "installed";
+    }
+    try {
+      const exec = mod?.chromium?.executablePath?.();
+      if (exec) {
+        chromium = await pathExists(exec);
+      }
+    } catch {
+      chromium = false;
+    }
+  } catch {
+    installed = false;
+  }
+  return { installed, chromium, version };
+}
 
 program
   .command("import-desktop-session")
