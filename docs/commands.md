@@ -143,8 +143,8 @@ Options:
                                 browser (default: false)
   --timeout-ms <ms>             How long to wait for the dashboard feed to load
                                 (default: 20000)
-  --poll-ms <ms>                Polling interval while waiting for the
-                                dashboard feed (default: 250)
+  --poll-ms <ms>                Polling interval while waiting for the dashboard
+                                feed (default: 250)
   --page-size <n>               Pagination size for dashboard project requests
                                 (default: 100)
   --limit <n>                   Limit human-readable rows; JSON output still
@@ -228,8 +228,7 @@ Options:
                                   browser (default: false)
   --keep-open                     Leave the browser window open after prompt
                                   submission (default: false)
-  --mode <mode>                   Switch Lovable to build or plan before
-                                  sending
+  --mode <mode>                   Switch Lovable to build or plan before sending
   --verify                        Capture preview screenshots after the prompt
                                   persisted (default: false)
   --verify-output-dir <path>      Directory for post-prompt preview screenshots
@@ -244,20 +243,20 @@ Options:
                                   blocking during verify (default: false)
   --expect-text <text>            Assert that preview body text contains this
                                   string (default: [])
-  --forbid-text <text>            Assert that preview body text does not
-                                  contain this string (default: [])
+  --forbid-text <text>            Assert that preview body text does not contain
+                                  this string (default: [])
   --no-auto-split                 Send the prompt as a single Lovable message
                                   even if it looks too large
   --allow-fragment                Send a prompt even if it looks truncated or
                                   unfinished (default: false)
   --answer-question <text>        If Lovable opens a Questions card after the
                                   prompt, answer it with this text
-  --question-option <label>       Question option label to target before
-                                  filling free text (default: "Other")
+  --question-option <label>       Question option label to target before filling
+                                  free text (default: "Other")
   --question-timeout-ms <ms>      How long to wait for a delayed Questions card
                                   after the prompt (default: 8000)
-  --no-wait-for-idle              Skip waiting for Lovable to become idle
-                                  before post-prompt verification
+  --no-wait-for-idle              Skip waiting for Lovable to become idle before
+                                  post-prompt verification
   --auto-resume                   Automatically click Resume queue / Continue
                                   queue while waiting for idle (default: false)
   --idle-timeout-ms <ms>          How long to wait for Lovable to become idle
@@ -343,8 +342,8 @@ Options:
 ```text
 Usage: lovagentic questions [options] <target-url>
 
-Read the visible Lovable Questions card, including its current prompt and
-footer actions.
+Read the visible Lovable Questions card, including its current prompt and footer
+actions.
 
 Arguments:
   target-url                    Lovable project URL
@@ -358,10 +357,10 @@ Options:
                                 browser (default: false)
   --timeout-ms <ms>             How long to wait for the Questions card
                                 (default: 5000)
-  --poll-ms <ms>                Polling interval while waiting for the
-                                Questions card (default: 250)
-  --json                        Print the extracted Questions card state as
-                                JSON (default: false)
+  --poll-ms <ms>                Polling interval while waiting for the Questions
+                                card (default: 250)
+  --json                        Print the extracted Questions card state as JSON
+                                (default: false)
   -h, --help                    display help for command
 ```
 
@@ -386,8 +385,8 @@ Options:
                                 browser (default: false)
   --exact                       Require an exact case-insensitive label match
                                 (default: false)
-  --index <n>                   Zero-based match index if more than one
-                                question action label matches (default: 0)
+  --index <n>                   Zero-based match index if more than one question
+                                action label matches (default: 0)
   --timeout-ms <ms>             How long to wait for the question action click
                                 (default: 15000)
   --actions-timeout-ms <ms>     How long to wait for visible question actions
@@ -413,8 +412,8 @@ Arguments:
 
 Options:
   --profile-dir <path>           Override the CLI browser profile path
-  --seed-desktop-session         Refresh the Playwright profile from the
-                                 desktop app before launch (default: false)
+  --seed-desktop-session         Refresh the Playwright profile from the desktop
+                                 app before launch (default: false)
   --desktop-profile-dir <path>   Override the Lovable desktop profile path
   --headless                     Run headlessly instead of opening a visible
                                  browser (default: false)
@@ -422,12 +421,12 @@ Options:
                                  free text (default: "Other")
   --timeout-ms <ms>              How long to wait for the question field
                                  (default: 15000)
-  --settle-ms <ms>               Extra wait time after clicking Submit
-                                 (default: 1500)
+  --settle-ms <ms>               Extra wait time after clicking Submit (default:
+                                 1500)
   --actions-timeout-ms <ms>      How long to wait for the question card before
                                  and after submit (default: 5000)
-  --actions-poll-ms <ms>         Polling interval while waiting for the
-                                 question card (default: 250)
+  --actions-poll-ms <ms>         Polling interval while waiting for the question
+                                 card (default: 250)
   --chat-accept-timeout-ms <ms>  How long to wait for Lovable to accept the
                                  answer on the server (default: 30000)
   --no-submit                    Only fill the free-text field; do not click
@@ -476,16 +475,15 @@ Arguments:
 
 Options:
   --profile-dir <path>           Override the CLI browser profile path
-  --seed-desktop-session         Refresh the Playwright profile from the
-                                 desktop app before launch (default: false)
+  --seed-desktop-session         Refresh the Playwright profile from the desktop
+                                 app before launch (default: false)
   --desktop-profile-dir <path>   Override the Lovable desktop profile path
   --headless                     Run headlessly instead of opening a visible
                                  browser (default: false)
   --exact                        Require an exact case-insensitive label match
                                  (default: false)
-  --index <n>                    Zero-based match index if more than one
-                                 runtime error action label matches (default:
-                                 0)
+  --index <n>                    Zero-based match index if more than one runtime
+                                 error action label matches (default: 0)
   --timeout-ms <ms>              How long to wait for the error action click
                                  (default: 15000)
   --actions-timeout-ms <ms>      How long to wait for visible runtime error
@@ -495,9 +493,9 @@ Options:
                                  runtime error actions (default: 250)
   --settle-ms <ms>               Extra wait time after the click before reading
                                  the page again (default: 1500)
-  --chat-accept-timeout-ms <ms>  How long to wait for Lovable to accept a Try
-                                 to fix recovery request on the server
-                                 (default: 30000)
+  --chat-accept-timeout-ms <ms>  How long to wait for Lovable to accept a Try to
+                                 fix recovery request on the server (default:
+                                 30000)
   -h, --help                     display help for command
 ```
 
@@ -522,8 +520,8 @@ Options:
                                 (default: false)
   --current-only                Only read the current page state; do not click
                                 View findings automatically (default: false)
-  --timeout-ms <ms>             How long to wait for the findings pane
-                                (default: 15000)
+  --timeout-ms <ms>             How long to wait for the findings pane (default:
+                                15000)
   --poll-ms <ms>                Polling interval while waiting for the findings
                                 pane (default: 250)
   --settle-ms <ms>              Extra wait time after clicking View findings
@@ -542,8 +540,8 @@ Options:
 ```text
 Usage: lovagentic chat-loop [options] <target-url> [prompt]
 
-Optionally send a prompt, then list and click visible Lovable chat-side
-actions, and optionally verify.
+Optionally send a prompt, then list and click visible Lovable chat-side actions,
+and optionally verify.
 
 Arguments:
   target-url                      Lovable project URL
@@ -559,20 +557,19 @@ Options:
                                   browser (default: false)
   --keep-open                     Leave the browser window open after the loop
                                   completes (default: false)
-  --mode <mode>                   Switch Lovable to build or plan before
-                                  sending
+  --mode <mode>                   Switch Lovable to build or plan before sending
   --action <label>                Click this visible chat-side action after the
                                   prompt (default: [])
   --exact-action                  Require exact case-insensitive matching for
                                   --action labels (default: false)
-  --action-index <n>              Zero-based match index if more than one
-                                  action label matches (default: 0)
-  --wait-for-actions-ms <ms>      How long to wait for visible chat-side
-                                  actions between loop steps (default: 10000)
+  --action-index <n>              Zero-based match index if more than one action
+                                  label matches (default: 0)
+  --wait-for-actions-ms <ms>      How long to wait for visible chat-side actions
+                                  between loop steps (default: 10000)
   --action-poll-ms <ms>           Polling interval while waiting for visible
                                   chat-side actions (default: 250)
-  --action-settle-ms <ms>         Extra wait time after each action click
-                                  before reading again (default: 1500)
+  --action-settle-ms <ms>         Extra wait time after each action click before
+                                  reading again (default: 1500)
   --selector <selector>           Override the prompt input selector
   --submit-selector <selector>    Override the submit button selector
   --post-submit-timeout-ms <ms>   How long to wait for Lovable to acknowledge
@@ -586,36 +583,36 @@ Options:
                                   and summary output
   --verify-desktop-only           Only capture the desktop preview after the
                                   loop (default: false)
-  --verify-mobile-only            Only capture the mobile preview after the
-                                  loop (default: false)
+  --verify-mobile-only            Only capture the mobile preview after the loop
+                                  (default: false)
   --verify-settle-ms <ms>         Extra wait time before each post-loop
                                   screenshot (default: 4000)
   --fail-on-console               Treat preview console warnings/errors as
                                   blocking during verify (default: false)
   --expect-text <text>            Assert that preview body text contains this
                                   string (default: [])
-  --forbid-text <text>            Assert that preview body text does not
-                                  contain this string (default: [])
+  --forbid-text <text>            Assert that preview body text does not contain
+                                  this string (default: [])
   --no-auto-split                 Send the prompt as a single Lovable message
                                   even if it looks too large
   --allow-fragment                Send a prompt even if it looks truncated or
                                   unfinished (default: false)
   --answer-question <text>        If Lovable opens a Questions card after the
                                   prompt, answer it with this text
-  --question-option <label>       Question option label to target before
-                                  filling free text (default: "Other")
+  --question-option <label>       Question option label to target before filling
+                                  free text (default: "Other")
   --question-timeout-ms <ms>      How long to wait for a delayed Questions card
                                   after the prompt (default: 8000)
-  --no-wait-for-idle              Skip waiting for Lovable to become idle
-                                  before post-loop verification
+  --no-wait-for-idle              Skip waiting for Lovable to become idle before
+                                  post-loop verification
   --auto-resume                   Automatically click Resume queue / Continue
                                   queue while waiting for idle (default: false)
   --idle-timeout-ms <ms>          How long to wait for Lovable to become idle
                                   before verify (default: 300000)
   --idle-poll-ms <ms>             Polling interval while waiting for Lovable to
                                   become idle (default: 3000)
-  --wait-after-loop-ms <ms>       Delay before the browser closes after the
-                                  loop (default: 4000)
+  --wait-after-loop-ms <ms>       Delay before the browser closes after the loop
+                                  (default: 4000)
   -h, --help                      display help for command
 ```
 
@@ -640,10 +637,10 @@ Options:
                                 (default: false)
   --timeout-ms <ms>             How long to wait for Lovable to finish
                                 publishing (default: 420000)
-  --live-url-timeout-ms <ms>    How long to wait for the live site URL to
-                                return success (default: 300000)
-  --poll-ms <ms>                Polling interval while waiting for the live
-                                site (default: 3000)
+  --live-url-timeout-ms <ms>    How long to wait for the live site URL to return
+                                success (default: 300000)
+  --poll-ms <ms>                Polling interval while waiting for the live site
+                                (default: 3000)
   --verify-live                 Capture screenshots and summary output against
                                 the published live URL (default: false)
   --verify-output-dir <path>    Directory for post-publish live screenshots and
@@ -652,14 +649,14 @@ Options:
                                 false)
   --verify-mobile-only          Only capture the mobile live site (default:
                                 false)
-  --verify-settle-ms <ms>       Extra wait time before each live-site
-                                screenshot (default: 4000)
+  --verify-settle-ms <ms>       Extra wait time before each live-site screenshot
+                                (default: 4000)
   --fail-on-console             Treat live-site console warnings/errors as
                                 blocking during verify (default: false)
   --expect-text <text>          Assert that live-site body text contains this
                                 string (default: [])
-  --forbid-text <text>          Assert that live-site body text does not
-                                contain this string (default: [])
+  --forbid-text <text>          Assert that live-site body text does not contain
+                                this string (default: [])
   -h, --help                    display help for command
 ```
 
@@ -793,8 +790,8 @@ Options:
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --headless                    Run headlessly instead of opening a visible
                                 browser (default: false)
-  --timeout-ms <ms>             How long to wait for the knowledge settings
-                                page (default: 90000)
+  --timeout-ms <ms>             How long to wait for the knowledge settings page
+                                (default: 90000)
   --project-text <text>         Set the project knowledge text
   --workspace-text <text>       Set the workspace knowledge text
   --json                        Print machine-readable JSON (default: false)
@@ -932,8 +929,7 @@ Options:
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --headless                    Run headlessly instead of opening a visible
                                 browser (default: false)
-  --device <name>               Audit desktop, mobile, or both (default:
-                                "both")
+  --device <name>               Audit desktop, mobile, or both (default: "both")
   --output-dir <path>           Directory for Lighthouse JSON reports
   --no-wait-for-idle            Skip waiting for Lovable to become idle before
                                 the audit
@@ -977,16 +973,15 @@ Options:
                                 one per non-empty line
   --forbid-file <path>          Read forbidden preview assertions from a file,
                                 one per non-empty line
-  --max-iterations <n>          Maximum prompt/verify iterations before
-                                stopping (default: 3)
+  --max-iterations <n>          Maximum prompt/verify iterations before stopping
+                                (default: 3)
   --output-dir <path>           Directory for iteration summaries and
                                 screenshots
   --desktop-only                Only capture the desktop preview (default:
                                 false)
-  --mobile-only                 Only capture the mobile preview (default:
-                                false)
-  --settle-ms <ms>              Extra wait time before each screenshot
-                                (default: 4000)
+  --mobile-only                 Only capture the mobile preview (default: false)
+  --settle-ms <ms>              Extra wait time before each screenshot (default:
+                                4000)
   --fail-on-console             Treat preview console warnings/errors as
                                 blocking (default: false)
   --no-auto-split               Send prompts as single Lovable messages even if
@@ -1022,8 +1017,7 @@ Options:
                                 output
   --desktop-only                Only capture the desktop preview (default:
                                 false)
-  --mobile-only                 Only capture the mobile preview (default:
-                                false)
+  --mobile-only                 Only capture the mobile preview (default: false)
   --headed                      Run the extraction and preview captures visibly
                                 (default: false)
   --no-wait-for-idle            Skip waiting for Lovable to become idle before
@@ -1034,8 +1028,8 @@ Options:
                                 before preview capture (default: 300000)
   --idle-poll-ms <ms>           Polling interval while waiting for Lovable to
                                 become idle (default: 3000)
-  --settle-ms <ms>              Extra wait time before each screenshot
-                                (default: 4000)
+  --settle-ms <ms>              Extra wait time before each screenshot (default:
+                                4000)
   --fail-on-console             Treat preview console warnings/errors as
                                 blocking (default: false)
   --expect-text <text>          Assert that preview body text contains this
