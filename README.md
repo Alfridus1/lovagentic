@@ -343,3 +343,4 @@ When extending this repo:
 - [AGENTS.md](./AGENTS.md)
 - [skills/lovagentic/SKILL.md](./skills/lovagentic/SKILL.md)
 - [docs/commands.md](./docs/commands.md)
+
