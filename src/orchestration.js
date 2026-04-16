@@ -1,10 +1,14 @@
 export const DEFAULT_IDLE_TIMEOUT_MS = 300_000;
 export const DEFAULT_IDLE_POLL_MS = 3_000;
 export const DEFAULT_IDLE_STREAK_TARGET = 3;
-export const DEFAULT_PROMPT_AUTO_SPLIT_THRESHOLD_CHARS = 1_800;
+export const DEFAULT_PROMPT_AUTO_SPLIT_THRESHOLD_CHARS = 1_000;
 export const DEFAULT_PROMPT_AUTO_SPLIT_THRESHOLD_NON_EMPTY_LINES = 24;
 export const DEFAULT_PROMPT_AUTO_SPLIT_MAX_CHUNK_CHARS = 1_200;
 export const DEFAULT_QUEUE_RESUME_ATTEMPTS = 3;
+export const DEFAULT_PROMPT_LENIENT_ACK_THRESHOLD_CHARS = 900;
+export const DEFAULT_PROMPT_LENIENT_ACK_THRESHOLD_NON_EMPTY_LINES = 16;
+export const DEFAULT_SINGLE_PROMPT_LENIENT_ACK_TIMEOUT_MS = 45_000;
+export const DEFAULT_FINAL_MULTIPART_PROMPT_TIMEOUT_MS = 60_000;
 
 export const QUEUE_RESUME_ACTION_LABELS = [
   "Resume queue",
@@ -22,6 +26,13 @@ function normalizePromptInput(value) {
   return String(value || "")
     .replace(/\r\n/g, "\n")
     .trim();
+}
+
+function getNonEmptyPromptLines(prompt) {
+  return normalizePromptInput(prompt)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function normalizeActionLabel(value) {
@@ -142,12 +153,44 @@ export function shouldAutoSplitPrompt(prompt, {
     return false;
   }
 
-  const nonEmptyLines = normalized
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const nonEmptyLines = getNonEmptyPromptLines(normalized);
 
   return normalized.length > thresholdChars || nonEmptyLines.length > thresholdNonEmptyLines;
+}
+
+export function shouldUseLenientPromptAck(prompt, {
+  thresholdChars = DEFAULT_PROMPT_LENIENT_ACK_THRESHOLD_CHARS,
+  thresholdNonEmptyLines = DEFAULT_PROMPT_LENIENT_ACK_THRESHOLD_NON_EMPTY_LINES
+} = {}) {
+  const normalized = normalizePromptInput(prompt);
+  if (!normalized) {
+    return false;
+  }
+
+  const nonEmptyLines = getNonEmptyPromptLines(normalized);
+  return normalized.length > thresholdChars || nonEmptyLines.length > thresholdNonEmptyLines;
+}
+
+export function getPromptTurnPostSubmitTimeoutMs({
+  prompt,
+  baseTimeoutMs = 20_000,
+  partIndex = 1,
+  totalParts = 1
+} = {}) {
+  const isFinalPart = partIndex === totalParts;
+  if (!isFinalPart) {
+    return Math.min(baseTimeoutMs, 8_000);
+  }
+
+  if (totalParts > 1) {
+    return Math.max(baseTimeoutMs, DEFAULT_FINAL_MULTIPART_PROMPT_TIMEOUT_MS);
+  }
+
+  if (shouldUseLenientPromptAck(prompt)) {
+    return Math.max(baseTimeoutMs, DEFAULT_SINGLE_PROMPT_LENIENT_ACK_TIMEOUT_MS);
+  }
+
+  return baseTimeoutMs;
 }
 
 export function splitPromptIntoChunks(prompt, {

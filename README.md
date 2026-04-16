@@ -221,6 +221,8 @@ npm run start -- prompt "https://lovable.dev/projects/your-project" "$(cat ./lon
   --mode plan
 ```
 
+If you intentionally keep a large prompt in a single Lovable turn via `--no-auto-split`, the CLI now allows slower local echo on large prompts and relies on server acceptance plus reload persistence before failing.
+
 Send a prompt and immediately verify the resulting live preview:
 
 ```bash

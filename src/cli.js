@@ -64,7 +64,9 @@ import {
   buildPromptSequence,
   DEFAULT_IDLE_POLL_MS,
   DEFAULT_IDLE_TIMEOUT_MS,
-  parseAssertionLines
+  getPromptTurnPostSubmitTimeoutMs,
+  parseAssertionLines,
+  shouldUseLenientPromptAck
 } from "./orchestration.js";
 import { pathExists, seedDesktopProfileIntoPlaywrightDefault } from "./profile.js";
 import { buildCreateUrl, normalizeTargetUrl } from "./url.js";
@@ -3049,9 +3051,13 @@ async function runPromptSequence(page, {
 
   for (const part of parts) {
     const isFinalPart = part.index === part.total;
-    const turnPostSubmitTimeoutMs = isFinalPart
-      ? (part.total > 1 ? Math.max(postSubmitTimeoutMs, 60_000) : postSubmitTimeoutMs)
-      : Math.min(postSubmitTimeoutMs, 8_000);
+    const lenientAck = part.total === 1 && shouldUseLenientPromptAck(part.rawPrompt);
+    const turnPostSubmitTimeoutMs = getPromptTurnPostSubmitTimeoutMs({
+      prompt: part.rawPrompt,
+      baseTimeoutMs: postSubmitTimeoutMs,
+      partIndex: part.index,
+      totalParts: part.total
+    });
     const turn = await runPromptTurn(page, {
       normalizedUrl,
       prompt: part.prompt,
@@ -3060,16 +3066,17 @@ async function runPromptSequence(page, {
       postSubmitTimeoutMs: turnPostSubmitTimeoutMs,
       verificationTimeoutMs,
       headless,
-      requireLocalAck: isFinalPart && part.total === 1,
+      requireLocalAck: isFinalPart && part.total === 1 && !lenientAck,
       requirePersistence: isFinalPart,
       autoResumeQueue: Boolean(autoResume),
-      persistenceRetries: isFinalPart && part.total > 1 ? 2 : 0,
+      persistenceRetries: isFinalPart && (part.total > 1 || lenientAck) ? 2 : 0,
       persistenceRetryDelayMs: 5_000,
-      persistenceSettleMs: isFinalPart && part.total > 1 ? 10_000 : 6_000
+      persistenceSettleMs: isFinalPart && (part.total > 1 || lenientAck) ? 10_000 : 6_000
     });
 
     const entry = {
       ...part,
+      lenientAck,
       warnings: part.index === 1 ? warnings : [],
       ...turn
     };
@@ -3131,8 +3138,8 @@ function printPromptSequenceLogs(sequence, {
     if (entry.chatAccepted?.ok) {
       console.log(`${label}: Lovable accepted the chat request on the server.`);
     }
-    if (!entry.postSubmit?.ok && entry.total > 1) {
-      console.log(`${label}: no immediate local echo detected; relying on server acceptance and final persistence checks for this multipart prompt.`);
+    if (!entry.postSubmit?.ok && (entry.total > 1 || entry.lenientAck)) {
+      console.log(`${label}: no immediate local echo detected; relying on server acceptance and final persistence checks.`);
     }
     if (entry.verificationResolved?.ok) {
       console.log(`${label}: Interactive verification cleared.`);

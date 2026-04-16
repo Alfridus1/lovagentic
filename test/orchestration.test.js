@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   buildPromptSequence,
   classifyIdleStateSnapshot,
+  getPromptTurnPostSubmitTimeoutMs,
   parseAssertionLines,
+  shouldUseLenientPromptAck,
   splitPromptIntoChunks
 } from "../src/orchestration.js";
 
@@ -62,6 +64,65 @@ test("splitPromptIntoChunks falls back to line-based splitting for oversized blo
   assert.equal(chunks[0], `line 1 ${"A".repeat(24)}`);
   assert.equal(chunks[1], `line 2 ${"B".repeat(24)}`);
   assert.equal(chunks[2], `line 3 ${"C".repeat(24)}`);
+});
+
+test("shouldUseLenientPromptAck returns true for longer single-part prompts", () => {
+  const longPrompt = [
+    "SECTION 1",
+    "A".repeat(320),
+    "",
+    "SECTION 2",
+    "B".repeat(320),
+    "",
+    "SECTION 3",
+    "C".repeat(320)
+  ].join("\n");
+
+  assert.equal(shouldUseLenientPromptAck(longPrompt), true);
+  assert.equal(shouldUseLenientPromptAck("Short prompt."), false);
+});
+
+test("getPromptTurnPostSubmitTimeoutMs extends timeouts for long single-part and final multipart prompts", () => {
+  const longPrompt = [
+    "SECTION 1",
+    "A".repeat(320),
+    "",
+    "SECTION 2",
+    "B".repeat(320),
+    "",
+    "SECTION 3",
+    "C".repeat(320)
+  ].join("\n");
+
+  assert.equal(
+    getPromptTurnPostSubmitTimeoutMs({
+      prompt: longPrompt,
+      baseTimeoutMs: 20_000,
+      partIndex: 1,
+      totalParts: 1
+    }),
+    45_000
+  );
+
+  assert.equal(
+    getPromptTurnPostSubmitTimeoutMs({
+      prompt: "part 1",
+      baseTimeoutMs: 20_000,
+      partIndex: 1,
+      totalParts: 3
+    }),
+    8_000
+  );
+
+  assert.equal(
+    getPromptTurnPostSubmitTimeoutMs({
+      prompt: "final part",
+      baseTimeoutMs: 20_000,
+      partIndex: 3,
+      totalParts: 3
+    }),
+    60_000
+  );
 });
 
 test("parseAssertionLines ignores blanks and comments while preserving order and duplicates", () => {
