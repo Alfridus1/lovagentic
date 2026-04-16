@@ -40,6 +40,7 @@ Install:
 ```bash
 npm install
 npx playwright install chromium
+npm run check
 ```
 
 ## Auth And Session
@@ -90,6 +91,14 @@ npm run start -- speed "https://lovable.dev/projects/..."
 npm run start -- fidelity-loop "https://lovable.dev/projects/..."
 npm run start -- workspace "https://lovable.dev/projects/..."
 npm run start -- knowledge "https://lovable.dev/projects/..."
+```
+
+Repo maintenance commands:
+
+```bash
+npm run help
+npm test
+npm run check
 ```
 
 ## Safe Testing Policy
@@ -212,6 +221,7 @@ When extending this repo:
 - verify changes with a real Lovable project whenever possible
 - keep new commands idempotent when practical
 - fail with explicit errors when a Lovable UI surface is missing or changed
+- keep `README.md`, CI, and regression tests in sync with user-facing behavior
 
 When debugging:
 

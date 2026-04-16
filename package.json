@@ -2,14 +2,38 @@
   "name": "lovable-cli",
   "version": "0.1.0",
   "private": true,
-  "description": "Local CLI prototype for steering Lovable via official URLs and browser automation.",
+  "description": "Browser-first CLI for steering Lovable through stable, user-owned surfaces.",
   "type": "module",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Alfridus1/lovable-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Alfridus1/lovable-cli/issues"
+  },
+  "homepage": "https://github.com/Alfridus1/lovable-cli#readme",
+  "keywords": [
+    "lovable",
+    "cli",
+    "playwright",
+    "automation",
+    "mcp"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "lovable-cli": "./src/cli.js"
   },
   "scripts": {
     "start": "node ./src/cli.js",
-    "doctor": "node ./src/cli.js doctor"
+    "help": "node ./src/cli.js --help",
+    "doctor": "node ./src/cli.js doctor",
+    "test": "node --test ./test/browser.idle.test.js ./test/browser.multiline.test.js ./test/orchestration.test.js",
+    "check:syntax": "node --check ./src/browser.js && node --check ./src/cli.js && node --check ./src/config.js && node --check ./src/orchestration.js && node --check ./src/profile.js && node --check ./src/url.js",
+    "check": "npm run check:syntax && npm test",
+    "ci": "npm run check"
   },
   "dependencies": {
     "commander": "^12.1.0",
