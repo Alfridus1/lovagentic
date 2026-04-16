@@ -25,6 +25,17 @@ This repository is production-minded, but still pragmatic:
 
 If Lovable or Cloudflare triggers an interactive verification, headed runs are still the reliable path.
 
+## Roadmap
+
+| Version | Status | What changes |
+| --- | --- | --- |
+| **v0.1** | ✅ Available now (npm) | Browser automation. Headless Playwright control of every Lovable surface. |
+| **v0.2** | 🔵 Next week | Native MCP backend. Drops the browser layer when Lovable's official MCP ships. Same `lovagentic` CLI, ~10× faster, fully supported by Lovable. |
+| **v0.3** | 🟣 Soon | CI/CD plugins. First-class GitHub Actions, GitLab CI, and Vercel-build integrations. |
+| **v0.4** | ⚪ Future | Hosted control plane. Multi-tenant `lovagentic`-as-a-service for agencies and AI agent fleets running 100+ Lovable projects. |
+
+> Native MCP support coming next week — early access by Lovable.
+
 ## Why this repo exists
 
 Lovable's desktop app is useful, but a user-owned CLI is much easier to reason about when it stays on durable surfaces:
