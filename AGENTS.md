@@ -69,6 +69,7 @@ npm run start -- login
 npm run start -- list
 npm run start -- create "Build a simple landing page"
 npm run start -- prompt "https://lovable.dev/projects/..." "Add a hero CTA"
+npm run start -- prompt "https://lovable.dev/projects/..." "Use the attached files as reference." --file ./test/fixtures/reference-doc.pdf
 npm run start -- questions "https://lovable.dev/projects/..."
 npm run start -- question-answer "https://lovable.dev/projects/..." "Concrete answer text"
 npm run start -- mode "https://lovable.dev/projects/..." plan
@@ -153,6 +154,7 @@ For a single end-to-end proposal run:
 - project creation through build URLs
 - dashboard project/workspace listing through the logged-in `/dashboard` page
 - prompt submission with server-side accept checks
+- local file attachments on prompt flows through Lovable's hidden chat file input
 - idle-state detection through `wait-for-idle`
 - prompt guard for obviously truncated prompts
 - automatic prompt splitting for large Lovable messages

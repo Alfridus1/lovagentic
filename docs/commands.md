@@ -246,6 +246,8 @@ Options:
                                   string (default: [])
   --forbid-text <text>            Assert that preview body text does not contain
                                   this string (default: [])
+  --file <path>                   Attach a local reference file to the prompt;
+                                  repeat for multiple files (default: [])
   --no-auto-split                 Send the prompt as a single Lovable message
                                   even if it looks too large
   --allow-fragment                Send a prompt even if it looks truncated or
@@ -594,6 +596,8 @@ Options:
                                   string (default: [])
   --forbid-text <text>            Assert that preview body text does not contain
                                   this string (default: [])
+  --file <path>                   Attach a local reference file to the prompt;
+                                  repeat for multiple files (default: [])
   --no-auto-split                 Send the prompt as a single Lovable message
                                   even if it looks too large
   --allow-fragment                Send a prompt even if it looks truncated or
@@ -985,6 +989,8 @@ Options:
                                 4000)
   --fail-on-console             Treat preview console warnings/errors as
                                 blocking (default: false)
+  --file <path>                 Attach a local reference file to the initial
+                                prompt; repeat for multiple files (default: [])
   --no-auto-split               Send prompts as single Lovable messages even if
                                 they look too large
   --allow-fragment              Send prompts even if they look truncated or

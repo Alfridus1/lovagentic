@@ -255,6 +255,111 @@ export async function fillPrompt(page, prompt, {
   return fillEditableTarget(page, handle, prompt);
 }
 
+async function getPromptFileInput(page, timeoutMs = 15_000) {
+  await waitForChatComposer(page, {
+    timeoutMs,
+    pollMs: 250
+  });
+
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const locator = page.locator("form#chat-input input[type='file'], input[type='file']#file-upload, input[type='file']").first();
+    const count = await locator.count().catch(() => 0);
+    if (count > 0) {
+      return locator;
+    }
+    await page.waitForTimeout(250);
+  }
+
+  throw new Error("Could not find a Lovable file input near the chat composer.");
+}
+
+export async function getPromptAttachmentState(page) {
+  return page.evaluate(() => {
+    const form = document.querySelector("form#chat-input") ||
+      document.querySelector('[aria-label="Chat input"]')?.closest("form") ||
+      null;
+
+    if (!form) {
+      return {
+        formFound: false,
+        inputPresent: false,
+        filenames: [],
+        removeActions: [],
+        text: "",
+        sendEnabled: null
+      };
+    }
+
+    const fileInput = form.querySelector("input[type='file']") ||
+      document.querySelector("input[type='file']#file-upload") ||
+      document.querySelector("input[type='file']");
+    const sendButton = form.querySelector(
+      "#chatinput-send-message-button,[type='submit'],button[aria-label*='Send' i]"
+    );
+    const filenames = fileInput?.files
+      ? Array.from(fileInput.files)
+        .map((file) => String(file.name || "").trim())
+        .filter(Boolean)
+      : [];
+
+    const removeActions = Array.from(form.querySelectorAll("[aria-label]"))
+      .map((element) => String(element.getAttribute("aria-label") || "").trim())
+      .filter((label) => /^Remove\s+/i.test(label));
+
+    return {
+      formFound: true,
+      inputPresent: Boolean(fileInput),
+      filenames,
+      removeActions,
+      text: String(form.innerText || form.textContent || "").replace(/\s+/g, " ").trim(),
+      sendEnabled: sendButton ? !sendButton.matches("[disabled],[aria-disabled='true']") : null
+    };
+  });
+}
+
+export async function uploadPromptAttachments(page, filePaths, {
+  timeoutMs = 15_000,
+  pollMs = 250
+} = {}) {
+  const normalizedPaths = Array.isArray(filePaths)
+    ? filePaths.map((filePath) => path.resolve(filePath))
+    : [];
+
+  if (normalizedPaths.length === 0) {
+    return {
+      uploaded: [],
+      state: await getPromptAttachmentState(page)
+    };
+  }
+
+  const expectedFilenames = normalizedPaths.map((filePath) => path.basename(filePath));
+  const input = await getPromptFileInput(page, timeoutMs);
+  await input.setInputFiles(normalizedPaths);
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await getPromptAttachmentState(page);
+    const allPresent = expectedFilenames.every((filename) => {
+      return state.filenames.includes(filename) || state.text.includes(filename);
+    });
+
+    if (allPresent) {
+      return {
+        uploaded: expectedFilenames,
+        state
+      };
+    }
+
+    await page.waitForTimeout(pollMs);
+  }
+
+  throw new Error(
+    `Lovable did not show the uploaded attachments within the expected time. Expected: ${expectedFilenames.join(", ")}`
+  );
+}
+
 export async function submitPrompt(page, {
   submitSelector
 } = {}) {

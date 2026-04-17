@@ -93,6 +93,7 @@ ${sections}`.trimEnd() + "\n";
 }
 
 async function main() {
+  const checkMode = process.argv.includes("--check");
   const rootHelp = await runCliHelp(["--help"]);
   const commands = parseCommandsFromRootHelp(rootHelp);
   const commandHelps = {};
@@ -101,8 +102,22 @@ async function main() {
     commandHelps[command] = await runCliHelp([command, "--help"]);
   }
 
+  const nextContent = renderMarkdown(rootHelp, commandHelps);
+
+  if (checkMode) {
+    const currentContent = await fs.readFile(OUTPUT_PATH, "utf8").catch(() => null);
+    if (currentContent !== nextContent) {
+      console.error(`Command reference is out of date: ${path.relative(REPO_ROOT, OUTPUT_PATH)}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    console.log(`Command reference is up to date: ${path.relative(REPO_ROOT, OUTPUT_PATH)}`);
+    return;
+  }
+
   await fs.mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
-  await fs.writeFile(OUTPUT_PATH, renderMarkdown(rootHelp, commandHelps), "utf8");
+  await fs.writeFile(OUTPUT_PATH, nextContent, "utf8");
   console.log(`Wrote ${path.relative(REPO_ROOT, OUTPUT_PATH)}`);
 }
 

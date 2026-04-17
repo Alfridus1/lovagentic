@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Local file attachment support for prompt-driven Lovable flows
 - Repository automation and ownership metadata:
   - GitHub Actions CI
   - Dependabot
@@ -20,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - README structure and maintenance workflow
 - Package scripts for help, checks, CI, and command-reference generation
+- Prompt orchestration can now upload reference files before sending the first prompt turn
 
 ## [0.1.0] - 2026-04-16
 

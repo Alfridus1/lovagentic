@@ -248,6 +248,22 @@ npm run start -- prompt "https://lovable.dev/projects/your-project" \
 
 If you deliberately keep a large prompt in a single Lovable turn with `--no-auto-split`, the CLI now gives larger prompts more time and can rely on server acceptance plus reload persistence before failing.
 
+### Attach local reference files to a prompt
+
+Attach one or more local files directly to the Lovable composer:
+
+```bash
+npm run start -- prompt "https://lovable.dev/projects/your-project" \
+  "Use the attached files as reference context before changing the UI." \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --file ./test/fixtures/reference-image.svg \
+  --file ./test/fixtures/reference-data.csv \
+  --file ./test/fixtures/reference-doc.pdf
+```
+
+The current uploader path has been live-verified with image-like files, CSV, and PDF attachments through Lovable's hidden chat file input.
+
 ### Run a plan approval flow
 
 ```bash

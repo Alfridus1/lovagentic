@@ -53,6 +53,7 @@ import {
   updateProjectSettings,
   updateProjectSubdomain,
   updatePublishedSettings,
+  uploadPromptAttachments,
   waitForChatAcceptance,
   waitForProjectIdle,
   waitForPromptResult,
@@ -475,6 +476,7 @@ program
   .option("--fail-on-console", "Treat preview console warnings/errors as blocking during verify", false)
   .option("--expect-text <text>", "Assert that preview body text contains this string", collectValues, [])
   .option("--forbid-text <text>", "Assert that preview body text does not contain this string", collectValues, [])
+  .option("--file <path>", "Attach a local reference file to the prompt; repeat for multiple files", collectValues, [])
   .option("--no-auto-split", "Send the prompt as a single Lovable message even if it looks too large")
   .option("--allow-fragment", "Send a prompt even if it looks truncated or unfinished", false)
   .option("--answer-question <text>", "If Lovable opens a Questions card after the prompt, answer it with this text")
@@ -496,6 +498,7 @@ program
   )
   .action(async (targetUrl, prompt, options) => {
     const profileDir = getProfileDir(options.profileDir);
+    const attachmentPaths = await resolveAttachmentPaths(options.file);
     if (options.seedDesktopSession) {
       await seedDesktopProfileIntoPlaywrightDefault({
         fromDir: getDesktopProfileDir(options.desktopProfileDir),
@@ -530,6 +533,7 @@ program
       const promptSequence = await runPromptSequence(page, {
         normalizedUrl,
         prompt,
+        attachmentPaths,
         autoSplit: Boolean(options.autoSplit),
         allowFragment: Boolean(options.allowFragment),
         selector: options.selector,
@@ -1156,6 +1160,7 @@ program
   .option("--fail-on-console", "Treat preview console warnings/errors as blocking during verify", false)
   .option("--expect-text <text>", "Assert that preview body text contains this string", collectValues, [])
   .option("--forbid-text <text>", "Assert that preview body text does not contain this string", collectValues, [])
+  .option("--file <path>", "Attach a local reference file to the prompt; repeat for multiple files", collectValues, [])
   .option("--no-auto-split", "Send the prompt as a single Lovable message even if it looks too large")
   .option("--allow-fragment", "Send a prompt even if it looks truncated or unfinished", false)
   .option("--answer-question <text>", "If Lovable opens a Questions card after the prompt, answer it with this text")
@@ -1168,6 +1173,10 @@ program
   .option("--wait-after-loop-ms <ms>", "Delay before the browser closes after the loop", parseInteger, 4_000)
   .action(async (targetUrl, prompt, options) => {
     const profileDir = getProfileDir(options.profileDir);
+    const attachmentPaths = await resolveAttachmentPaths(options.file);
+    if (!prompt && attachmentPaths.length > 0) {
+      throw new Error("Attachment files require a prompt in chat-loop. Pass a prompt argument or omit --file.");
+    }
     if (options.seedDesktopSession) {
       await seedDesktopProfileIntoPlaywrightDefault({
         fromDir: getDesktopProfileDir(options.desktopProfileDir),
@@ -1210,6 +1219,7 @@ program
         const promptSequence = await runPromptSequence(page, {
           normalizedUrl,
           prompt,
+          attachmentPaths,
           autoSplit: Boolean(options.autoSplit),
           allowFragment: Boolean(options.allowFragment),
           selector: options.selector,
@@ -1980,6 +1990,7 @@ addProjectSessionOptions(
   .option("--mobile-only", "Only capture the mobile preview", false)
   .option("--settle-ms <ms>", "Extra wait time before each screenshot", parseInteger, 4000)
   .option("--fail-on-console", "Treat preview console warnings/errors as blocking", false)
+  .option("--file <path>", "Attach a local reference file to the initial prompt; repeat for multiple files", collectValues, [])
   .option("--no-auto-split", "Send prompts as single Lovable messages even if they look too large")
   .option("--allow-fragment", "Send prompts even if they look truncated or unfinished", false)
   .option("--auto-resume", "Automatically click Resume queue / Continue queue while waiting for idle", false)
@@ -1992,6 +2003,10 @@ addProjectSessionOptions(
         prompt,
         promptFile: options.promptFile
       });
+      const attachmentPaths = await resolveAttachmentPaths(options.file);
+      if (!initialPrompt && attachmentPaths.length > 0) {
+        throw new Error("Attachment files require an initial prompt in fidelity-loop. Pass a prompt or --prompt-file.");
+      }
       const expectText = await resolveAssertionValues({
         values: options.expectText,
         filePath: options.expectFile
@@ -2037,6 +2052,7 @@ addProjectSessionOptions(
           promptSequence = await runPromptSequence(page, {
             normalizedUrl,
             prompt: nextPrompt,
+            attachmentPaths: iteration === 1 ? attachmentPaths : [],
             autoSplit: Boolean(options.autoSplit),
             allowFragment: Boolean(options.allowFragment),
             postSubmitTimeoutMs: 20_000,
@@ -2946,6 +2962,27 @@ async function resolveInitialPrompt({
   return null;
 }
 
+async function resolveAttachmentPaths(values = []) {
+  const resolved = [];
+
+  for (const value of Array.isArray(values) ? values : []) {
+    const resolvedPath = path.resolve(value);
+    const stat = await fs.stat(resolvedPath).catch(() => null);
+
+    if (!stat) {
+      throw new Error(`Attachment file does not exist: ${resolvedPath}`);
+    }
+
+    if (!stat.isFile()) {
+      throw new Error(`Attachment path is not a file: ${resolvedPath}`);
+    }
+
+    resolved.push(resolvedPath);
+  }
+
+  return resolved;
+}
+
 async function resolveAssertionValues({
   values = [],
   filePath
@@ -3105,6 +3142,7 @@ async function observePromptFlowState(page, {
 async function runPromptSequence(page, {
   normalizedUrl,
   prompt,
+  attachmentPaths = [],
   autoSplit = true,
   allowFragment = false,
   selector,
@@ -3139,6 +3177,7 @@ async function runPromptSequence(page, {
     const turn = await runPromptTurn(page, {
       normalizedUrl,
       prompt: part.prompt,
+      attachmentPaths: part.index === 1 ? attachmentPaths : [],
       selector,
       submitSelector,
       postSubmitTimeoutMs: turnPostSubmitTimeoutMs,
@@ -3216,6 +3255,9 @@ function printPromptSequenceLogs(sequence, {
     if (entry.chatAccepted?.ok) {
       console.log(`${label}: Lovable accepted the chat request on the server.`);
     }
+    if (entry.attachmentResult?.uploaded?.length > 0) {
+      console.log(`${label}: attached ${entry.attachmentResult.uploaded.join(", ")}.`);
+    }
     if (!entry.postSubmit?.ok && (entry.total > 1 || entry.lenientAck)) {
       console.log(`${label}: no immediate local echo detected; relying on server acceptance and final persistence checks.`);
     }
@@ -3287,6 +3329,7 @@ function printFidelityLoopResult(result) {
 async function runPromptTurn(page, {
   normalizedUrl,
   prompt,
+  attachmentPaths = [],
   selector,
   submitSelector,
   postSubmitTimeoutMs = 20_000,
@@ -3299,6 +3342,14 @@ async function runPromptTurn(page, {
   persistenceRetryDelayMs = 5_000,
   persistenceSettleMs = 6_000
 }) {
+  let attachmentResult = null;
+  if (Array.isArray(attachmentPaths) && attachmentPaths.length > 0) {
+    attachmentResult = await uploadPromptAttachments(page, attachmentPaths, {
+      timeoutMs: 15_000,
+      pollMs: 250
+    });
+  }
+
   const fillResult = await fillPrompt(page, prompt, { selector });
   await page.waitForTimeout(400);
 
@@ -3399,6 +3450,7 @@ async function runPromptTurn(page, {
   }
 
   return {
+    attachmentResult,
     fillResult,
     submitResult,
     verificationResolved,
