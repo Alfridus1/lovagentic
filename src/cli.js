@@ -2499,6 +2499,7 @@ program
   .option("--fail-on-console", "Treat preview console warnings/errors as blocking", false)
   .option("--expect-text <text>", "Assert that preview body text contains this string", collectValues, [])
   .option("--forbid-text <text>", "Assert that preview body text does not contain this string", collectValues, [])
+  .option("--authenticated", "Reuse the Lovable browser profile when capturing previews so unpublished/private routes render (defaults to anonymous)", false)
   .action(async (targetUrl, options) => {
     const profileDir = getProfileDir(options.profileDir);
     if (options.seedDesktopSession) {
@@ -2542,8 +2543,17 @@ program
         contextLabel: "preview verification"
       });
 
+      // When --authenticated is requested, close the dashboard context first so
+      // the preview capture can open its own persistent context against the
+      // same profile directory without locking conflicts.
+      let previewProfileDir = null;
+      if (options.authenticated) {
+        previewProfileDir = profileDir;
+        await context.close();
+      }
+
       await runPreviewVerification({
-        page,
+        page: options.authenticated ? null : page,
         normalizedUrl,
         outputDir,
         headless,
@@ -2554,10 +2564,16 @@ program
         forbidText: options.forbidText,
         routes: getVerificationRoutes(options.route),
         explicitRoutes: Array.isArray(options.route) && options.route.length > 0,
-        sourceLabel: "Preview"
+        sourceLabel: "Preview",
+        profileDir: previewProfileDir,
+        precomputedPreviewInfo: options.authenticated
+          ? { src: `https://${normalizedUrl.match(/\/projects\/([^/?#]+)/)?.[1]}.lovableproject.com/` }
+          : null
       });
     } finally {
-      await context.close();
+      if (!options.authenticated) {
+        await context.close();
+      }
     }
   });
 
@@ -4215,9 +4231,11 @@ async function runPreviewVerification({
   expectText = [],
   forbidText = [],
   sourceLabel = "Preview",
-  throwOnBlocking = true
+  throwOnBlocking = true,
+  profileDir = null,
+  precomputedPreviewInfo = null
 }) {
-  const previewInfo = await getProjectPreviewInfo(page);
+  const previewInfo = precomputedPreviewInfo || await getProjectPreviewInfo(page);
   return runUrlVerification({
     targetUrl: normalizedUrl,
     captureUrl: previewInfo.src,
@@ -4232,7 +4250,8 @@ async function runPreviewVerification({
     forbidText,
     sourceLabel,
     summarySourceKey: "previewSource",
-    throwOnBlocking
+    throwOnBlocking,
+    profileDir
   });
 }
 
@@ -4250,7 +4269,8 @@ async function runUrlVerification({
   forbidText = [],
   sourceLabel = "Preview",
   summarySourceKey = "captureSource",
-  throwOnBlocking = true
+  throwOnBlocking = true,
+  profileDir = null
 }) {
   if (!captureUrl) {
     throw new Error(`${sourceLabel} URL is missing.`);
@@ -4304,7 +4324,8 @@ async function runUrlVerification({
         headless,
         settleMs,
         expectText,
-        forbidText
+        forbidText,
+        profileDir
       });
 
       console.log(`${capitalize(variant)} screenshot (${route}): ${result.outputPath}`);

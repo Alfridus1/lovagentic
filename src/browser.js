@@ -3392,27 +3392,51 @@ export async function capturePreviewSnapshot({
   expectText = [],
   forbidText = [],
   timeoutMs = 60_000,
-  settleMs = 4_000
+  settleMs = 4_000,
+  profileDir = null
 }) {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
-  const browser = await chromium.launch({
-    headless,
-    args: [
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-blink-features=AutomationControlled"
-    ]
-  });
+  // When profileDir is provided, reuse the authenticated Lovable profile so
+  // unpublished preview URLs (which require an active Lovable session) can be
+  // captured instead of falling through to a login page. When profileDir is
+  // null, keep the old clean-browser behavior so published public previews
+  // still capture without an auth footprint.
+  let browser = null;
+  let context = null;
+  if (profileDir) {
+    context = await chromium.launchPersistentContext(profileDir, {
+      headless,
+      viewport,
+      isMobile,
+      hasTouch,
+      deviceScaleFactor,
+      args: [
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-blink-features=AutomationControlled"
+      ]
+    });
+  } else {
+    browser = await chromium.launch({
+      headless,
+      args: [
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-blink-features=AutomationControlled"
+      ]
+    });
+    context = await browser.newContext({
+      viewport,
+      isMobile,
+      hasTouch,
+      deviceScaleFactor
+    });
+  }
 
-  const context = await browser.newContext({
-    viewport,
-    isMobile,
-    hasTouch,
-    deviceScaleFactor
-  });
-
-  const page = await context.newPage();
+  // When launchPersistentContext is used, a default page already exists —
+  // reuse it to avoid duplicate blank pages that occasionally steal focus.
+  const page = context.pages()[0] || await context.newPage();
   const consoleEntries = [];
   const pageErrors = [];
   const failedRequests = [];
@@ -3566,7 +3590,9 @@ export async function capturePreviewSnapshot({
     };
   } finally {
     await context.close();
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   }
 }
 

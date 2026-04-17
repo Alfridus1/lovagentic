@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-04-18
+
+### Added
+
+- `verify --authenticated` reuses the Lovable browser profile when capturing previews so unpublished or auth-gated routes (e.g. draft `/docs/*` pages served off the preview origin) can be screenshotted instead of falling through to the Lovable login page. Default behavior remains anonymous capture so public published previews stay auth-footprint-free.
+- `capturePreviewSnapshot` gained an optional `profileDir` parameter to power the above. When provided it uses `chromium.launchPersistentContext` against the profile; when omitted it falls back to the previous clean-browser `chromium.launch` path.
+
 ## [0.1.5] - 2026-04-18
 
 ### Fixed
