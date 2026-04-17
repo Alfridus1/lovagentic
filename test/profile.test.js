@@ -30,8 +30,8 @@ async function writeSeedEntry(baseDir, entry) {
 }
 
 test("seedDesktopProfileIntoPlaywrightDefault tolerates concurrent force seeding on the same target", async () => {
-  const sourceDir = await makeTempDir("lovable-cli-profile-source-");
-  const targetDir = await makeTempDir("lovable-cli-profile-target-");
+  const sourceDir = await makeTempDir("lovagentic-profile-source-");
+  const targetDir = await makeTempDir("lovagentic-profile-target-");
 
   try {
     await Promise.all(PROFILE_SEED_ENTRIES.map((entry) => writeSeedEntry(sourceDir, entry)));

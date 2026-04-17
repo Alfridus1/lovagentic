@@ -256,7 +256,7 @@ Attach one or more local files directly to the Lovable composer:
 ```bash
 npm run start -- prompt "https://lovable.dev/projects/your-project" \
   "Use the attached files as reference context before changing the UI." \
-  --profile-dir /tmp/lovable-cli-profile \
+  --profile-dir /tmp/lovagentic-profile \
   --seed-desktop-session \
   --file ./test/fixtures/reference-image.svg \
   --file ./test/fixtures/reference-data.csv \
@@ -269,7 +269,7 @@ You can also send attachments without prompt text when you only want Lovable to 
 
 ```bash
 npm run start -- prompt "https://lovable.dev/projects/your-project" \
-  --profile-dir /tmp/lovable-cli-profile \
+  --profile-dir /tmp/lovagentic-profile \
   --seed-desktop-session \
   --file ./test/fixtures/reference-doc.pdf \
   --file ./test/fixtures/reference-data.csv
@@ -281,7 +281,7 @@ Use `attachments` to inspect the composer state or upload files without creating
 
 ```bash
 npm run start -- attachments "https://lovable.dev/projects/your-project" \
-  --profile-dir /tmp/lovable-cli-profile \
+  --profile-dir /tmp/lovagentic-profile \
   --seed-desktop-session \
   --file ./test/fixtures/reference-image.svg \
   --file ./test/fixtures/reference-doc.pdf
@@ -294,7 +294,7 @@ If Lovable opens a `Questions` card and you need to provide supporting files, `q
 ```bash
 npm run start -- question-answer "https://lovable.dev/projects/your-project" \
   "Use the attached documents for the final implementation." \
-  --profile-dir /tmp/lovable-cli-profile \
+  --profile-dir /tmp/lovagentic-profile \
   --seed-desktop-session \
   --file ./test/fixtures/reference-doc.pdf
 ```
@@ -394,4 +394,3 @@ When extending this repo:
 - [AGENTS.md](./AGENTS.md)
 - [skills/lovagentic/SKILL.md](./skills/lovagentic/SKILL.md)
 - [docs/commands.md](./docs/commands.md)
-
