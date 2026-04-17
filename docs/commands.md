@@ -22,12 +22,13 @@ Commands:
   list [options]                                   List Lovable dashboard projects plus the visible workspace menu entries.
   create [options] <prompt>                        Generate a Lovable Build-with-URL link and optionally open it.
   mode [options] <target-url> <mode>               Switch the Lovable composer between Build and Plan.
-  prompt [options] <target-url> <prompt>           Open a Lovable project page in a persistent browser and submit a prompt.
+  prompt [options] <target-url> [prompt]           Open a Lovable project page in a persistent browser and submit a prompt.
   actions [options] <target-url>                   List visible chat-side Lovable actions near the composer, such as plan approvals.
   action [options] <target-url> <label>            Click a visible chat-side Lovable action button, such as Approve or Verify it works.
   questions [options] <target-url>                 Read the visible Lovable Questions card, including its current prompt and footer actions.
   question-action [options] <target-url> <label>   Click a visible Lovable Questions-card action, such as Skip, Submit, or Next question.
   question-answer [options] <target-url> <answer>  Fill the visible Lovable Questions-card free-text field and optionally submit it.
+  attachments [options] <target-url>               Inspect the Lovable composer attachment state and optionally upload local files without sending.
   errors [options] <target-url>                    Read the visible Lovable runtime/build error surface, including Try to fix and Show logs.
   error-action [options] <target-url> <label>      Click a visible Lovable runtime/build error action, such as Try to fix or Show logs.
   findings [options] <target-url>                  Open Lovable's inline Security findings pane and extract the visible issues.
@@ -62,6 +63,7 @@ Commands:
 - [`questions`](#questions)
 - [`question-action`](#question-action)
 - [`question-answer`](#question-answer)
+- [`attachments`](#attachments)
 - [`errors`](#errors)
 - [`error-action`](#error-action)
 - [`findings`](#findings)
@@ -212,13 +214,13 @@ Options:
 ## prompt
 
 ```text
-Usage: lovagentic prompt [options] <target-url> <prompt>
+Usage: lovagentic prompt [options] <target-url> [prompt]
 
 Open a Lovable project page in a persistent browser and submit a prompt.
 
 Arguments:
   target-url                      Lovable project URL
-  prompt                          Follow-up prompt
+  prompt                          Optional follow-up prompt
 
 Options:
   --profile-dir <path>            Override the CLI browser profile path
@@ -422,6 +424,9 @@ Options:
                                  browser (default: false)
   --option <label>               Question option label to target before filling
                                  free text (default: "Other")
+  --file <path>                  Attach a local reference file before filling
+                                 the answer; repeat for multiple files (default:
+                                 [])
   --timeout-ms <ms>              How long to wait for the question field
                                  (default: 15000)
   --settle-ms <ms>               Extra wait time after clicking Submit (default:
@@ -435,6 +440,35 @@ Options:
   --no-submit                    Only fill the free-text field; do not click
                                  Submit
   -h, --help                     display help for command
+```
+
+## attachments
+
+```text
+Usage: lovagentic attachments [options] <target-url>
+
+Inspect the Lovable composer attachment state and optionally upload local files
+without sending.
+
+Arguments:
+  target-url                    Lovable project URL
+
+Options:
+  --profile-dir <path>          Override the CLI browser profile path
+  --seed-desktop-session        Refresh the Playwright profile from the desktop
+                                app before launch (default: false)
+  --desktop-profile-dir <path>  Override the Lovable desktop profile path
+  --headless                    Run headlessly instead of opening a visible
+                                browser (default: false)
+  --file <path>                 Attach a local reference file without sending
+                                the chat message; repeat for multiple files
+                                (default: [])
+  --timeout-ms <ms>             How long to wait for attachment chips to appear
+                                (default: 15000)
+  --poll-ms <ms>                Polling interval while waiting for attachment
+                                chips (default: 250)
+  --json                        Print machine-readable JSON (default: false)
+  -h, --help                    display help for command
 ```
 
 ## errors

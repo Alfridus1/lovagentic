@@ -191,6 +191,7 @@ Important constraints:
 | --- | --- |
 | `mode` | Switch the Lovable composer between `build` and `plan` |
 | `prompt` | Submit a prompt into a project |
+| `attachments` | Inspect or stage local attachments in the Lovable composer without sending |
 | `actions` / `action` | Inspect or click visible proposal actions |
 | `questions` / `question-action` / `question-answer` | Handle Lovable clarification cards |
 | `errors` / `error-action` | Inspect or click runtime/build error actions |
@@ -263,6 +264,40 @@ npm run start -- prompt "https://lovable.dev/projects/your-project" \
 ```
 
 The current uploader path has been live-verified with image-like files, CSV, and PDF attachments through Lovable's hidden chat file input.
+
+You can also send attachments without prompt text when you only want Lovable to ingest reference files first:
+
+```bash
+npm run start -- prompt "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --file ./test/fixtures/reference-doc.pdf \
+  --file ./test/fixtures/reference-data.csv
+```
+
+### Inspect or stage attachments without sending
+
+Use `attachments` to inspect the composer state or upload files without creating a chat turn:
+
+```bash
+npm run start -- attachments "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --file ./test/fixtures/reference-image.svg \
+  --file ./test/fixtures/reference-doc.pdf
+```
+
+### Answer a Lovable question with attached files
+
+If Lovable opens a `Questions` card and you need to provide supporting files, `question-answer` now supports the same uploader path:
+
+```bash
+npm run start -- question-answer "https://lovable.dev/projects/your-project" \
+  "Use the attached documents for the final implementation." \
+  --profile-dir /tmp/lovable-cli-profile \
+  --seed-desktop-session \
+  --file ./test/fixtures/reference-doc.pdf
+```
 
 ### Run a plan approval flow
 

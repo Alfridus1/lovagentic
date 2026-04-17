@@ -277,6 +277,19 @@ async function getPromptFileInput(page, timeoutMs = 15_000) {
 
 export async function getPromptAttachmentState(page) {
   return page.evaluate(() => {
+    const isRendered = (element) => {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0;
+    };
     const form = document.querySelector("form#chat-input") ||
       document.querySelector('[aria-label="Chat input"]')?.closest("form") ||
       null;
@@ -295,9 +308,18 @@ export async function getPromptAttachmentState(page) {
     const fileInput = form.querySelector("input[type='file']") ||
       document.querySelector("input[type='file']#file-upload") ||
       document.querySelector("input[type='file']");
-    const sendButton = form.querySelector(
-      "#chatinput-send-message-button,[type='submit'],button[aria-label*='Send' i]"
-    );
+    const sendButton = Array.from(document.querySelectorAll(
+      "#chatinput-send-message-button,[type='submit'],button[aria-label*='Send' i],button"
+    )).find((element) => {
+      if (!(element instanceof HTMLElement) || !isRendered(element)) {
+        return false;
+      }
+
+      const label = String(element.getAttribute("aria-label") || element.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return /send message|^send$/i.test(label);
+    }) || null;
     const filenames = fileInput?.files
       ? Array.from(fileInput.files)
         .map((file) => String(file.name || "").trim())
@@ -1079,6 +1101,7 @@ async function submitQuestionPane(page, {
 export async function answerProjectQuestion(page, {
   projectUrl,
   answer,
+  attachmentPaths = [],
   optionLabel = "Other",
   submit = true,
   timeoutMs = 15_000,
@@ -1104,6 +1127,14 @@ export async function answerProjectQuestion(page, {
     throw new Error(
       "The current Lovable question does not expose a free-text answer field. Use question-action instead."
     );
+  }
+
+  let attachmentResult = null;
+  if (Array.isArray(attachmentPaths) && attachmentPaths.length > 0) {
+    attachmentResult = await uploadPromptAttachments(page, attachmentPaths, {
+      timeoutMs,
+      pollMs: 250
+    });
   }
 
   const fillResult = await fillQuestionInput(page, answer, {
@@ -1158,6 +1189,7 @@ export async function answerProjectQuestion(page, {
   }
 
   return {
+    attachmentResult,
     fillResult,
     submitResult,
     chatAccepted,
@@ -3260,8 +3292,11 @@ export async function capturePreviewSnapshot({
   }
 }
 
-async function getPromptState(page, prompt) {
-  return page.evaluate((expectedPrompt) => {
+async function getPromptState(page, {
+  prompt,
+  attachmentNames = []
+} = {}) {
+  return page.evaluate((expectedPayload) => {
     const normalizePromptComparisonText = (value) => {
       return String(value || "")
         .replace(/\r\n/g, "\n")
@@ -3283,37 +3318,94 @@ async function getPromptState(page, prompt) {
 
       return String(element.innerText ?? element.textContent ?? "");
     };
+    const removeFirstOccurrence = (value, fragment) => {
+      if (!fragment) {
+        return String(value || "");
+      }
 
-    const normalizedExpectedPrompt = normalizePromptComparisonText(expectedPrompt);
-    const bodyText = normalizePromptComparisonText(document.body?.innerText || "");
+      const source = String(value || "");
+      const index = source.indexOf(fragment);
+      if (index < 0) {
+        return source;
+      }
+
+      return `${source.slice(0, index)} ${source.slice(index + fragment.length)}`;
+    };
+
+    const normalizedExpectedPrompt = normalizePromptComparisonText(expectedPayload?.prompt || "");
+    const normalizedAttachmentNames = (expectedPayload?.attachmentNames || [])
+      .map((value) => normalizePromptComparisonText(value))
+      .filter(Boolean);
+    const hasExpectedPrompt = normalizedExpectedPrompt.length > 0;
+    const hasExpectedAttachments = normalizedAttachmentNames.length > 0;
+
+    const bodyRawText = String(document.body?.innerText || document.body?.textContent || "");
     const input = document.querySelector('[aria-label="Chat input"]');
+    const composer = document.querySelector("form#chat-input") || input?.closest("form") || input;
     const inputRawText = readElementText(input);
     const inputText = normalizePromptComparisonText(inputRawText);
-    const bodyWithoutInput = normalizePromptComparisonText(
-      document.body?.innerText?.replace(inputRawText || "", "") || ""
+    const composerRawText = readElementText(composer);
+    const composerText = normalizePromptComparisonText(composerRawText);
+    const bodyText = normalizePromptComparisonText(bodyRawText);
+    const bodyWithoutComposer = normalizePromptComparisonText(
+      removeFirstOccurrence(bodyRawText, composerRawText)
     );
 
+    const hasPromptText = hasExpectedPrompt
+      ? bodyText.includes(normalizedExpectedPrompt)
+      : false;
+    const hasPromptOutsideInput = hasExpectedPrompt
+      ? bodyWithoutComposer.includes(normalizedExpectedPrompt)
+      : false;
+    const promptStillInInput = hasExpectedPrompt
+      ? inputText.includes(normalizedExpectedPrompt)
+      : false;
+    const hasAttachmentsOutsideComposer = hasExpectedAttachments
+      ? normalizedAttachmentNames.every((value) => bodyWithoutComposer.includes(value))
+      : false;
+    const attachmentsStillInComposer = hasExpectedAttachments
+      ? normalizedAttachmentNames.some((value) => composerText.includes(value))
+      : false;
+    const hasExpectedPayloadOutsideComposer = (!hasExpectedPrompt || hasPromptOutsideInput) &&
+      (!hasExpectedAttachments || hasAttachmentsOutsideComposer);
+    const payloadStillInComposer = (hasExpectedPrompt && promptStillInInput) ||
+      (hasExpectedAttachments && attachmentsStillInComposer);
+
     return {
-      hasPromptText: bodyText.includes(normalizedExpectedPrompt),
-      hasPromptOutsideInput: bodyWithoutInput.includes(normalizedExpectedPrompt),
-      promptStillInInput: inputText.includes(normalizedExpectedPrompt),
+      hasPromptText,
+      hasPromptOutsideInput,
+      promptStillInInput,
+      hasAttachmentsOutsideComposer,
+      attachmentsStillInComposer,
+      hasExpectedPayloadOutsideComposer,
+      payloadStillInComposer,
       needsVerification: bodyText.includes("Verification required"),
       isThinking: bodyText.includes("Thinking"),
       inputText,
+      composerText,
       bodyText
     };
-  }, prompt);
+  }, {
+    prompt,
+    attachmentNames
+  });
 }
 
 export async function waitForPromptResult(page, {
   prompt,
+  attachmentNames = [],
   timeoutMs = 20_000,
   pollMs = 1_000
 }) {
   const deadline = Date.now() + timeoutMs;
+  const hasPrompt = normalizeText(prompt).length > 0;
+  const hasAttachments = Array.isArray(attachmentNames) && attachmentNames.length > 0;
 
   while (Date.now() < deadline) {
-    const state = await getPromptState(page, prompt);
+    const state = await getPromptState(page, {
+      prompt,
+      attachmentNames
+    });
 
     if (state.needsVerification) {
       return {
@@ -3323,10 +3415,10 @@ export async function waitForPromptResult(page, {
       };
     }
 
-    if (state.hasPromptOutsideInput && !state.promptStillInInput) {
+    if (state.hasExpectedPayloadOutsideComposer && !state.payloadStillInComposer) {
       return {
         ok: true,
-        reason: "prompt_visible",
+        reason: hasPrompt ? "prompt_visible" : hasAttachments ? "attachments_visible" : "payload_visible",
         state
       };
     }
@@ -3408,18 +3500,26 @@ export async function waitForChatAcceptance(page, {
 
 export async function waitForVerificationResolution(page, {
   prompt,
+  attachmentNames = [],
   timeoutMs = 10 * 60 * 1000,
   pollMs = 1_000
 }) {
+  const hasPrompt = normalizeText(prompt).length > 0;
+  const hasAttachments = Array.isArray(attachmentNames) && attachmentNames.length > 0;
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const state = await getPromptState(page, prompt);
+    const state = await getPromptState(page, {
+      prompt,
+      attachmentNames
+    });
 
-    if (!state.needsVerification && !state.promptStillInInput) {
+    if (!state.needsVerification && !state.payloadStillInComposer) {
       return {
         ok: true,
-        reason: state.hasPromptOutsideInput ? "prompt_visible" : "input_cleared",
+        reason: state.hasExpectedPayloadOutsideComposer
+          ? hasPrompt ? "prompt_visible" : hasAttachments ? "attachments_visible" : "payload_visible"
+          : "input_cleared",
         state
       };
     }
@@ -3430,12 +3530,16 @@ export async function waitForVerificationResolution(page, {
   return {
     ok: false,
     reason: "verification_timeout",
-    state: await getPromptState(page, prompt)
+    state: await getPromptState(page, {
+      prompt,
+      attachmentNames
+    })
   };
 }
 
 export async function confirmPromptPersistsAfterReload(page, {
   prompt,
+  attachmentNames = [],
   timeoutMs = 20_000,
   settleMs = 6_000,
   pollMs = 1_000
@@ -3446,7 +3550,10 @@ export async function confirmPromptPersistsAfterReload(page, {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const state = await getPromptState(page, prompt);
+    const state = await getPromptState(page, {
+      prompt,
+      attachmentNames
+    });
 
     if (state.needsVerification) {
       return {
@@ -3456,7 +3563,7 @@ export async function confirmPromptPersistsAfterReload(page, {
       };
     }
 
-    if (state.hasPromptOutsideInput && !state.promptStillInInput) {
+    if (state.hasExpectedPayloadOutsideComposer && !state.payloadStillInComposer) {
       return {
         ok: true,
         reason: "persisted_after_reload",

@@ -40,6 +40,7 @@ import {
   hasLovableSession,
   getProjectPreviewInfo,
   getWorkspaceSettingsState,
+  getPromptAttachmentState,
   launchLovableContext,
   listChatActions,
   publishProject,
@@ -461,7 +462,7 @@ program
   .command("prompt")
   .description("Open a Lovable project page in a persistent browser and submit a prompt.")
   .argument("<target-url>", "Lovable project URL")
-  .argument("<prompt>", "Follow-up prompt")
+  .argument("[prompt]", "Optional follow-up prompt")
   .option("--profile-dir <path>", "Override the CLI browser profile path")
   .option("--seed-desktop-session", "Refresh the Playwright profile from the desktop app before launch", false)
   .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
@@ -499,6 +500,9 @@ program
   .action(async (targetUrl, prompt, options) => {
     const profileDir = getProfileDir(options.profileDir);
     const attachmentPaths = await resolveAttachmentPaths(options.file);
+    if (!hasText(prompt) && attachmentPaths.length === 0) {
+      throw new Error("Pass a prompt, --file, or both.");
+    }
     if (options.seedDesktopSession) {
       await seedDesktopProfileIntoPlaywrightDefault({
         fromDir: getDesktopProfileDir(options.desktopProfileDir),
@@ -861,6 +865,7 @@ program
   .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
   .option("--headless", "Run headlessly instead of opening a visible browser", false)
   .option("--option <label>", "Question option label to target before filling free text", "Other")
+  .option("--file <path>", "Attach a local reference file before filling the answer; repeat for multiple files", collectValues, [])
   .option("--timeout-ms <ms>", "How long to wait for the question field", parseInteger, 15_000)
   .option("--settle-ms <ms>", "Extra wait time after clicking Submit", parseInteger, 1_500)
   .option("--actions-timeout-ms <ms>", "How long to wait for the question card before and after submit", parseInteger, 5_000)
@@ -869,6 +874,7 @@ program
   .option("--no-submit", "Only fill the free-text field; do not click Submit")
   .action(async (targetUrl, answer, options) => {
     const profileDir = getProfileDir(options.profileDir);
+    const attachmentPaths = await resolveAttachmentPaths(options.file);
     if (options.seedDesktopSession) {
       await seedDesktopProfileIntoPlaywrightDefault({
         fromDir: getDesktopProfileDir(options.desktopProfileDir),
@@ -897,6 +903,7 @@ program
       const result = await answerProjectQuestion(page, {
         projectUrl: normalizedUrl,
         answer,
+        attachmentPaths,
         optionLabel: options.option,
         submit: Boolean(options.submit),
         timeoutMs: options.timeoutMs,
@@ -907,6 +914,9 @@ program
       });
 
       console.log(`Filled question via ${result.fillResult.method} (${result.fillResult.tagName}).`);
+      if (result.attachmentResult?.uploaded?.length > 0) {
+        console.log(`Attached before answer: ${result.attachmentResult.uploaded.join(", ")}.`);
+      }
       if (options.submit) {
         console.log("Submitted the question answer.");
         if (result.chatAccepted?.ok) {
@@ -920,6 +930,47 @@ program
     } finally {
       await context.close();
     }
+  });
+
+program
+  .command("attachments")
+  .description("Inspect the Lovable composer attachment state and optionally upload local files without sending.")
+  .argument("<target-url>", "Lovable project URL")
+  .option("--profile-dir <path>", "Override the CLI browser profile path")
+  .option("--seed-desktop-session", "Refresh the Playwright profile from the desktop app before launch", false)
+  .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
+  .option("--headless", "Run headlessly instead of opening a visible browser", false)
+  .option("--file <path>", "Attach a local reference file without sending the chat message; repeat for multiple files", collectValues, [])
+  .option("--timeout-ms <ms>", "How long to wait for attachment chips to appear", parseInteger, 15_000)
+  .option("--poll-ms <ms>", "Polling interval while waiting for attachment chips", parseInteger, 250)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page }) => {
+      const attachmentPaths = await resolveAttachmentPaths(options.file);
+      let uploadResult = null;
+      if (attachmentPaths.length > 0) {
+        uploadResult = await uploadPromptAttachments(page, attachmentPaths, {
+          timeoutMs: options.timeoutMs,
+          pollMs: options.pollMs
+        });
+      }
+
+      const state = await getPromptAttachmentState(page);
+      const payload = {
+        uploaded: uploadResult?.uploaded || [],
+        state
+      };
+
+      if (options.json) {
+        console.log(JSON.stringify(payload, null, 2));
+        return;
+      }
+
+      if (payload.uploaded.length > 0) {
+        console.log(`Uploaded attachments: ${payload.uploaded.join(", ")}`);
+      }
+      printPromptAttachmentState(state);
+    });
   });
 
 program
@@ -1174,9 +1225,7 @@ program
   .action(async (targetUrl, prompt, options) => {
     const profileDir = getProfileDir(options.profileDir);
     const attachmentPaths = await resolveAttachmentPaths(options.file);
-    if (!prompt && attachmentPaths.length > 0) {
-      throw new Error("Attachment files require a prompt in chat-loop. Pass a prompt argument or omit --file.");
-    }
+    const hasPromptOrAttachments = hasText(prompt) || attachmentPaths.length > 0;
     if (options.seedDesktopSession) {
       await seedDesktopProfileIntoPlaywrightDefault({
         fromDir: getDesktopProfileDir(options.desktopProfileDir),
@@ -1210,7 +1259,7 @@ program
       }
 
       let currentActions = [];
-      if (prompt) {
+      if (hasPromptOrAttachments) {
         const baselineActions = await listChatActions(page, {
           timeoutMs: Math.min(options.waitForActionsMs, 1_000),
           pollMs: options.actionPollMs
@@ -2004,9 +2053,6 @@ addProjectSessionOptions(
         promptFile: options.promptFile
       });
       const attachmentPaths = await resolveAttachmentPaths(options.file);
-      if (!initialPrompt && attachmentPaths.length > 0) {
-        throw new Error("Attachment files require an initial prompt in fidelity-loop. Pass a prompt or --prompt-file.");
-      }
       const expectText = await resolveAssertionValues({
         values: options.expectText,
         filePath: options.expectFile
@@ -2047,11 +2093,12 @@ addProjectSessionOptions(
         const iterationLabel = `iteration ${iteration}/${options.maxIterations}`;
         const iterationDir = path.join(outputDir, `iteration-${iteration}`);
         let promptSequence = null;
+        const shouldSendTurn = hasText(nextPrompt) || (iteration === 1 && attachmentPaths.length > 0);
 
-        if (nextPrompt) {
+        if (shouldSendTurn) {
           promptSequence = await runPromptSequence(page, {
             normalizedUrl,
-            prompt: nextPrompt,
+            prompt: nextPrompt || "",
             attachmentPaths: iteration === 1 ? attachmentPaths : [],
             autoSplit: Boolean(options.autoSplit),
             allowFragment: Boolean(options.allowFragment),
@@ -2284,8 +2331,20 @@ function parseInteger(value) {
   return parsed;
 }
 
+function hasText(value) {
+  return String(value || "").trim().length > 0;
+}
+
 function capitalize(value) {
   return `${value[0].toUpperCase()}${value.slice(1)}`;
+}
+
+function printPromptAttachmentState(state = {}) {
+  console.log(`Attachment form found: ${state.formFound ? "yes" : "no"}`);
+  console.log(`File input present: ${state.inputPresent ? "yes" : "no"}`);
+  console.log(`Send enabled: ${state.sendEnabled === null ? "unknown" : state.sendEnabled ? "yes" : "no"}`);
+  console.log(`Attached files: ${state.filenames?.length ? state.filenames.join(", ") : "(none)"}`);
+  console.log(`Remove actions: ${state.removeActions?.length ? state.removeActions.join(", ") : "(none)"}`);
 }
 
 function getPromptFragmentWarnings(prompt) {
@@ -3153,21 +3212,38 @@ async function runPromptSequence(page, {
   questionTimeoutMs = 8_000,
   autoResume = false
 } = {}) {
-  if (typeof prompt !== "string" || prompt.trim().length === 0) {
+  const normalizedPrompt = String(prompt || "");
+  const hasPrompt = hasText(normalizedPrompt);
+  const hasAttachments = Array.isArray(attachmentPaths) && attachmentPaths.length > 0;
+
+  if (!hasPrompt && !hasAttachments) {
     return [];
   }
 
-  const warnings = assertPromptLooksComplete(prompt, {
-    allowFragment
-  });
-  const parts = buildPromptSequence(prompt, {
-    autoSplit
-  });
+  const warnings = hasPrompt
+    ? assertPromptLooksComplete(normalizedPrompt, {
+      allowFragment
+    })
+    : [];
+  const parts = hasPrompt
+    ? buildPromptSequence(normalizedPrompt, {
+      autoSplit
+    })
+    : [{
+      index: 1,
+      total: 1,
+      rawPrompt: "",
+      prompt: "",
+      autoSplit: false,
+      attachmentOnly: true
+    }];
   const sequence = [];
 
   for (const part of parts) {
     const isFinalPart = part.index === part.total;
-    const lenientAck = part.total === 1 && shouldUseLenientPromptAck(part.rawPrompt);
+    const lenientAck = !part.attachmentOnly &&
+      part.total === 1 &&
+      shouldUseLenientPromptAck(part.rawPrompt);
     const turnPostSubmitTimeoutMs = getPromptTurnPostSubmitTimeoutMs({
       prompt: part.rawPrompt,
       baseTimeoutMs: postSubmitTimeoutMs,
@@ -3250,7 +3326,11 @@ function printPromptSequenceLogs(sequence, {
     const label = sequence.length > 1
       ? `${basePrefix}Prompt part ${entry.index}/${entry.total}`
       : `${basePrefix}Prompt`;
-    console.log(`${label} filled via ${entry.fillResult.method} (${entry.fillResult.tagName}).`);
+    if (entry.fillResult.method === "attachmentOnly") {
+      console.log(`${label}: sending attachments without prompt text.`);
+    } else {
+      console.log(`${label} filled via ${entry.fillResult.method} (${entry.fillResult.tagName}).`);
+    }
     console.log(`${label} submitted via ${entry.submitResult.method}.`);
     if (entry.chatAccepted?.ok) {
       console.log(`${label}: Lovable accepted the chat request on the server.`);
@@ -3342,6 +3422,9 @@ async function runPromptTurn(page, {
   persistenceRetryDelayMs = 5_000,
   persistenceSettleMs = 6_000
 }) {
+  const attachmentNames = Array.isArray(attachmentPaths)
+    ? attachmentPaths.map((filePath) => path.basename(filePath))
+    : [];
   let attachmentResult = null;
   if (Array.isArray(attachmentPaths) && attachmentPaths.length > 0) {
     attachmentResult = await uploadPromptAttachments(page, attachmentPaths, {
@@ -3350,7 +3433,12 @@ async function runPromptTurn(page, {
     });
   }
 
-  const fillResult = await fillPrompt(page, prompt, { selector });
+  const fillResult = hasText(prompt)
+    ? await fillPrompt(page, prompt, { selector })
+    : {
+      method: "attachmentOnly",
+      tagName: "none"
+    };
   await page.waitForTimeout(400);
 
   const chatAcceptance = waitForChatAcceptance(page, {
@@ -3360,6 +3448,7 @@ async function runPromptTurn(page, {
   const submitResult = await submitPrompt(page, { submitSelector });
   const postSubmit = await waitForPromptResult(page, {
     prompt,
+    attachmentNames,
     timeoutMs: postSubmitTimeoutMs
   });
 
@@ -3376,6 +3465,7 @@ async function runPromptTurn(page, {
       console.log("Lovable requested interactive verification. Complete it in the opened browser window.");
       verificationResolved = await waitForVerificationResolution(page, {
         prompt,
+        attachmentNames,
         timeoutMs: verificationTimeoutMs
       });
 
@@ -3425,6 +3515,7 @@ async function runPromptTurn(page, {
 
       persisted = await confirmPromptPersistsAfterReload(page, {
         prompt,
+        attachmentNames,
         timeoutMs: postSubmitTimeoutMs,
         settleMs: persistenceSettleMs
       });

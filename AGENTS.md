@@ -70,8 +70,10 @@ npm run start -- list
 npm run start -- create "Build a simple landing page"
 npm run start -- prompt "https://lovable.dev/projects/..." "Add a hero CTA"
 npm run start -- prompt "https://lovable.dev/projects/..." "Use the attached files as reference." --file ./test/fixtures/reference-doc.pdf
+npm run start -- prompt "https://lovable.dev/projects/..." --file ./test/fixtures/reference-doc.pdf
+npm run start -- attachments "https://lovable.dev/projects/..." --file ./test/fixtures/reference-doc.pdf
 npm run start -- questions "https://lovable.dev/projects/..."
-npm run start -- question-answer "https://lovable.dev/projects/..." "Concrete answer text"
+npm run start -- question-answer "https://lovable.dev/projects/..." "Concrete answer text" --file ./test/fixtures/reference-doc.pdf
 npm run start -- mode "https://lovable.dev/projects/..." plan
 npm run start -- actions "https://lovable.dev/projects/..."
 npm run start -- action "https://lovable.dev/projects/..." "Approve"
@@ -155,6 +157,8 @@ For a single end-to-end proposal run:
 - dashboard project/workspace listing through the logged-in `/dashboard` page
 - prompt submission with server-side accept checks
 - local file attachments on prompt flows through Lovable's hidden chat file input
+- attachment-only sends on `prompt`, `chat-loop`, and the initial `fidelity-loop` turn
+- composer attachment inspection and staging through `attachments`
 - idle-state detection through `wait-for-idle`
 - prompt guard for obviously truncated prompts
 - automatic prompt splitting for large Lovable messages
@@ -162,6 +166,7 @@ For a single end-to-end proposal run:
 - `build` and `plan` composer mode switching
 - reading Lovable clarification cards through `questions`
 - answering free-text Lovable clarification cards through `question-answer`
+- attaching local files before submitting a free-text Lovable clarification answer through `question-answer --file`
 - listing visible chat-side proposal actions near the composer
 - clicking button-driven follow-ups such as `Approve`, `Skip`, or similar Lovable proposal actions
 - reading Lovable's separate runtime/build error surface with `Try to fix` / `Show logs`
