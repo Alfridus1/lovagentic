@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-04-18
+
+### Fixed
+
+- Prompt persistence check no longer false-fails on long prompts (>600 chars normalized). Lovable collapses long chat bubbles, so a full verbatim `includes()` never matched after reload and every large prompt was incorrectly reported as `Lovable showed the prompt locally, but it did not persist after a page reload.` We now accept a prefix fingerprint match (first 160 characters of the normalized prompt) as evidence of persistence. Short prompts still require a verbatim match.
+- `status` no longer aborts when the preview iframe is slow to attach or the git panel times out; both surfaces are reported as soft errors so dashboard metadata and publish state still print.
+
+### Added
+
+- `test/prompt-match.test.js` with 8 new cases covering verbatim matches, fingerprint fallback, whitespace/markdown normalization, absent prompts, and length gating. Ships alongside a new exported `matchExpectedPromptInHaystack` helper for external reuse.
+
 ## [0.1.4] - 2026-04-17
 
 ### Added
@@ -22,10 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `prompt --no-auto-split` is now the explicit single-shot escape hatch for users who want one Lovable turn
 - README examples now document verified-action workflows and the recommended single-shot `--verify-effect` flow
 
-### Fixed
 
-- `status` no longer aborts when the preview iframe is slow to attach or the git panel times out; both surfaces are surfaced as soft errors in the output so dashboard metadata and publish state still report
-- Prompt persistence check no longer false-fails on long prompts (>600 chars normalized). Lovable collapses long chat bubbles so a full verbatim includes() never matches after reload; we now accept a prefix fingerprint match (first 160 chars) as evidence of persistence, with a new test suite covering both short and long cases
 
 ## [0.1.3] - 2026-04-17
 
