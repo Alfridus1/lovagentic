@@ -3570,6 +3570,46 @@ export async function capturePreviewSnapshot({
   }
 }
 
+export const LONG_PROMPT_MATCH_THRESHOLD = 600;
+export const PROMPT_FINGERPRINT_LENGTH = 160;
+export const PROMPT_FINGERPRINT_MIN_LENGTH = 40;
+
+function normalizePromptComparisonTextForNode(value) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim().replace(/^([>*#]+|\d+[.)]|[-*•])\s+/, ""))
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Returns true when `haystack` contains `expected` verbatim, OR when `expected`
+// is long enough that Lovable may truncate the rendered chat bubble and the
+// prefix fingerprint still matches. Exported for unit testing.
+export function matchExpectedPromptInHaystack(haystack, expected, {
+  longThreshold = LONG_PROMPT_MATCH_THRESHOLD,
+  fingerprintLength = PROMPT_FINGERPRINT_LENGTH,
+  fingerprintMinLength = PROMPT_FINGERPRINT_MIN_LENGTH
+} = {}) {
+  const normalizedHaystack = normalizePromptComparisonTextForNode(haystack);
+  const normalizedExpected = normalizePromptComparisonTextForNode(expected);
+  if (!normalizedExpected) {
+    return false;
+  }
+  if (normalizedHaystack.includes(normalizedExpected)) {
+    return true;
+  }
+  if (normalizedExpected.length > longThreshold) {
+    const fingerprint = normalizedExpected.slice(0, fingerprintLength);
+    if (fingerprint.length >= fingerprintMinLength && normalizedHaystack.includes(fingerprint)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function getPromptState(page, {
   prompt,
   attachmentNames = []
@@ -3629,14 +3669,38 @@ async function getPromptState(page, {
       removeFirstOccurrence(bodyRawText, composerRawText)
     );
 
-    const hasPromptText = hasExpectedPrompt
-      ? bodyText.includes(normalizedExpectedPrompt)
-      : false;
-    const hasPromptOutsideInput = hasExpectedPrompt
-      ? bodyWithoutComposer.includes(normalizedExpectedPrompt)
-      : false;
+    // Long prompts get collapsed/truncated in Lovable's rendered chat bubbles,
+    // so a full verbatim includes() rarely matches for multi-thousand-char
+    // prompts. Mirror the same hybrid logic as matchExpectedPromptInHaystack
+    // in the node side of the codebase: verbatim includes() always, plus a
+    // prefix-fingerprint fallback when the expected prompt exceeds the long
+    // threshold. Keep constants in sync with src/browser.js exports.
+    const longPromptThreshold = expectedPayload?.longPromptThreshold ?? 600;
+    const fingerprintLength = expectedPayload?.fingerprintLength ?? 160;
+    const fingerprintMinLength = expectedPayload?.fingerprintMinLength ?? 40;
+    const expectedIsLong = normalizedExpectedPrompt.length > longPromptThreshold;
+    const expectedFingerprint = hasExpectedPrompt
+      ? normalizedExpectedPrompt.slice(0, fingerprintLength)
+      : "";
+    const fingerprintIsUsable = expectedIsLong && expectedFingerprint.length >= fingerprintMinLength;
+    const matchExpected = (haystack) => {
+      if (!hasExpectedPrompt) {
+        return false;
+      }
+      if (haystack.includes(normalizedExpectedPrompt)) {
+        return true;
+      }
+      if (fingerprintIsUsable && haystack.includes(expectedFingerprint)) {
+        return true;
+      }
+      return false;
+    };
+
+    const hasPromptText = hasExpectedPrompt ? matchExpected(bodyText) : false;
+    const hasPromptOutsideInput = hasExpectedPrompt ? matchExpected(bodyWithoutComposer) : false;
     const promptStillInInput = hasExpectedPrompt
-      ? inputText.includes(normalizedExpectedPrompt)
+      ? (inputText.includes(normalizedExpectedPrompt) ||
+          (fingerprintIsUsable && inputText.includes(expectedFingerprint)))
       : false;
     const hasAttachmentsOutsideComposer = hasExpectedAttachments
       ? normalizedAttachmentNames.every((value) => bodyWithoutComposer.includes(value))
@@ -3665,7 +3729,10 @@ async function getPromptState(page, {
     };
   }, {
     prompt,
-    attachmentNames
+    attachmentNames,
+    longPromptThreshold: LONG_PROMPT_MATCH_THRESHOLD,
+    fingerprintLength: PROMPT_FINGERPRINT_LENGTH,
+    fingerprintMinLength: PROMPT_FINGERPRINT_MIN_LENGTH
   });
 }
 

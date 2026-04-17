@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - `status` no longer aborts when the preview iframe is slow to attach or the git panel times out; both surfaces are surfaced as soft errors in the output so dashboard metadata and publish state still report
+- Prompt persistence check no longer false-fails on long prompts (>600 chars normalized). Lovable collapses long chat bubbles so a full verbatim includes() never matches after reload; we now accept a prefix fingerprint match (first 160 chars) as evidence of persistence, with a new test suite covering both short and long cases
 
 ## [0.1.3] - 2026-04-17
 
