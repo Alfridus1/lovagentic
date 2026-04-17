@@ -36,8 +36,9 @@ test("waitForProjectIdle auto-resumes an exact Resume queue action", async () =>
     `);
 
     const result = await waitForProjectIdle(page, {
-      timeoutMs: 2_000,
+      timeoutMs: 5_000,
       pollMs: 100,
+      idleStreakTarget: 1,
       autoResume: true
     });
 
@@ -45,6 +46,8 @@ test("waitForProjectIdle auto-resumes an exact Resume queue action", async () =>
     assert.equal(result.reason, "idle");
     assert.equal(result.resumeAttempts, 1);
     assert.equal(result.state.status, "idle");
+    assert.equal(await page.locator("button[aria-label='Resume queue']").count(), 0);
+    assert.match(await page.locator("#status").innerText(), /All caught up\./);
   });
 });
 
