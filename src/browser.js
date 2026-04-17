@@ -2087,6 +2087,26 @@ async function fetchAllDashboardProjects(initialCapture, {
   };
 }
 
+function buildDashboardLookupFromCaptures(captures, {
+  dashboardUrl
+} = {}) {
+  const origin = new URL(dashboardUrl || DEFAULT_BASE_URL).origin;
+
+  return {
+    origin,
+    collectionSeeds: Object.fromEntries(
+      Array.from(captures.entries()).map(([key, capture]) => [
+        key,
+        {
+          key,
+          url: capture.url,
+          requestHeaders: getPaginationRequestHeaders(capture.requestHeaders)
+        }
+      ])
+    )
+  };
+}
+
 async function openDashboardWorkspaceMenu(page, {
   timeoutMs = 10_000
 } = {}) {
@@ -2370,7 +2390,8 @@ export async function getDashboardState(page, {
   dashboardUrl = new URL(DASHBOARD_PATH, DEFAULT_BASE_URL).toString(),
   timeoutMs = 20_000,
   pollMs = 250,
-  pageSize = 100
+  pageSize = 100,
+  includeLookup = false
 } = {}) {
   const bootstrap = await captureDashboardBootstrap(page, {
     dashboardUrl,
@@ -2401,7 +2422,7 @@ export async function getDashboardState(page, {
     })
   };
 
-  return {
+  const state = {
     dashboardUrl: bootstrap.dashboardUrl,
     currentWorkspace: {
       id: currentWorkspaceId,
@@ -2426,6 +2447,227 @@ export async function getDashboardState(page, {
       currentWorkspaceId,
       currentWorkspaceName: workspaceState.currentWorkspace.name
     })
+  };
+
+  if (includeLookup) {
+    state.lookup = buildDashboardLookupFromCaptures(bootstrap.captures, {
+      dashboardUrl
+    });
+  }
+
+  return state;
+}
+
+function buildDashboardProjectState(project, {
+  baseUrl = DEFAULT_BASE_URL,
+  workspaceId = null,
+  workspaceName = null,
+  collectionKey = "workspace"
+} = {}) {
+  const collections = {
+    workspace: { projects: [], total: 0 },
+    recent: { projects: [], total: 0 },
+    shared: { projects: [], total: 0 },
+    starred: { projects: [], total: 0 }
+  };
+  collections[collectionKey] = {
+    projects: [project],
+    total: 1
+  };
+
+  return mergeDashboardProjects({
+    collections,
+    baseUrl,
+    currentWorkspaceId: workspaceId,
+    currentWorkspaceName: workspaceName
+  })[0] || null;
+}
+
+function buildWorkspaceSearchSeed({
+  origin,
+  workspaceId,
+  requestHeaders
+}) {
+  if (!origin || !workspaceId || !requestHeaders || Object.keys(requestHeaders).length === 0) {
+    return null;
+  }
+
+  const requestUrl = new URL(`/workspaces/${workspaceId}/projects/search`, origin);
+  requestUrl.searchParams.set("sort_by", "last_edited_at");
+
+  return {
+    key: "workspace",
+    url: requestUrl.toString(),
+    requestHeaders
+  };
+}
+
+async function fetchDashboardProjectFromSeed(seed, {
+  projectId,
+  pageSize = 100,
+  maxPages = 50,
+  baseUrl = DEFAULT_BASE_URL,
+  workspaceId = null,
+  workspaceName = null
+} = {}) {
+  if (!seed?.url || !projectId) {
+    return null;
+  }
+
+  const collection = await fetchAllDashboardProjects(seed, {
+    pageSize,
+    maxPages
+  });
+  const project = (collection.projects || []).find((entry) => entry?.id === projectId);
+  if (!project) {
+    return null;
+  }
+
+  return buildDashboardProjectState(project, {
+    baseUrl,
+    workspaceId,
+    workspaceName,
+    collectionKey: seed.key || "workspace"
+  });
+}
+
+export async function getDashboardProjectState(page, {
+  projectId,
+  dashboardUrl = new URL(DASHBOARD_PATH, DEFAULT_BASE_URL).toString(),
+  timeoutMs = 20_000,
+  pollMs = 250,
+  pageSize = 100
+} = {}) {
+  const dashboard = await getDashboardState(page, {
+    dashboardUrl,
+    timeoutMs,
+    pollMs,
+    pageSize,
+    includeLookup: true
+  });
+
+  return {
+    dashboard,
+    lookup: dashboard.lookup || null,
+    project: (dashboard.projects || []).find((entry) => entry.id === projectId) || null
+  };
+}
+
+function parseDateValue(value) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function compareDashboardProjectState(baseline, current) {
+  const baselineEditCount = Number.isFinite(baseline?.editCount) ? baseline.editCount : null;
+  const currentEditCount = Number.isFinite(current?.editCount) ? current.editCount : null;
+  const baselineLastEditedAt = parseDateValue(baseline?.lastEditedAt);
+  const currentLastEditedAt = parseDateValue(current?.lastEditedAt);
+  const baselineUpdatedAt = parseDateValue(baseline?.updatedAt);
+  const currentUpdatedAt = parseDateValue(current?.updatedAt);
+
+  const editCountIncreased = currentEditCount !== null && (
+    baselineEditCount === null
+      ? currentEditCount > 0
+      : currentEditCount > baselineEditCount
+  );
+  const lastEditedAtAdvanced = currentLastEditedAt !== null && (
+    baselineLastEditedAt === null
+      ? true
+      : currentLastEditedAt > baselineLastEditedAt
+  );
+  const updatedAtAdvanced = currentUpdatedAt !== null && (
+    baselineUpdatedAt === null
+      ? true
+      : currentUpdatedAt > baselineUpdatedAt
+  );
+
+  return {
+    changed: editCountIncreased || lastEditedAtAdvanced,
+    editCountIncreased,
+    lastEditedAtAdvanced,
+    updatedAtAdvanced
+  };
+}
+
+export async function pollDashboardProjectState(page, {
+  projectId,
+  baseline,
+  lookup,
+  timeoutMs = 180_000,
+  initialPollMs = 3_000,
+  maxPollMs = 20_000,
+  pageSize = 100
+} = {}) {
+  const startTime = Date.now();
+  const deadline = startTime + timeoutMs;
+  const seedHeaders = lookup?.collectionSeeds?.workspace?.requestHeaders ||
+    lookup?.collectionSeeds?.recent?.requestHeaders ||
+    lookup?.collectionSeeds?.shared?.requestHeaders ||
+    lookup?.collectionSeeds?.starred?.requestHeaders ||
+    {};
+  const baseUrl = lookup?.origin || DEFAULT_BASE_URL;
+  const workspaceSeed = buildWorkspaceSearchSeed({
+    origin: baseUrl,
+    workspaceId: baseline?.workspaceId,
+    requestHeaders: seedHeaders
+  });
+  const fallbackSeeds = [
+    workspaceSeed,
+    lookup?.collectionSeeds?.recent || null,
+    lookup?.collectionSeeds?.shared || null,
+    lookup?.collectionSeeds?.starred || null,
+    lookup?.collectionSeeds?.workspace || null
+  ].filter(Boolean);
+
+  let lastProject = baseline || null;
+  let intervalMs = initialPollMs;
+
+  while (Date.now() <= deadline) {
+    for (const seed of fallbackSeeds) {
+      const project = await fetchDashboardProjectFromSeed(seed, {
+        projectId,
+        pageSize,
+        baseUrl,
+        workspaceId: baseline?.workspaceId || null,
+        workspaceName: baseline?.workspaceName || null
+      }).catch(() => null);
+
+      if (!project) {
+        continue;
+      }
+
+      lastProject = project;
+      const comparison = compareDashboardProjectState(baseline, project);
+      if (comparison.changed) {
+        return {
+          detected: true,
+          final: project,
+          comparison,
+          durationMs: Date.now() - startTime
+        };
+      }
+
+      break;
+    }
+
+    if (Date.now() >= deadline) {
+      break;
+    }
+
+    await page.waitForTimeout(intervalMs);
+    intervalMs = Math.min(maxPollMs, Math.round(intervalMs * 1.6));
+  }
+
+  return {
+    detected: false,
+    final: lastProject,
+    comparison: compareDashboardProjectState(baseline, lastProject),
+    durationMs: Date.now() - startTime
   };
 }
 
@@ -3101,6 +3343,42 @@ export async function getProjectPreviewInfo(page, {
   }
 
   throw new Error("Lovable preview iframe is present but never received a src.");
+}
+
+export async function readUrlTextSnapshot(context, {
+  url,
+  timeoutMs = 60_000,
+  settleMs = 4_000
+} = {}) {
+  const page = await context.newPage();
+
+  try {
+    const response = await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: timeoutMs
+    });
+    await page.waitForTimeout(settleMs);
+
+    const snapshot = await page.evaluate(() => {
+      const normalize = (value) => (value || "").replace(/\s+/g, " ").trim();
+      const bodyText = normalize(document.body?.innerText || "");
+
+      return {
+        title: document.title,
+        bodyText,
+        bodyTextLength: bodyText.length,
+        htmlLength: document.documentElement?.outerHTML.length || 0
+      };
+    });
+
+    return {
+      status: response?.status() ?? null,
+      finalUrl: page.url(),
+      snapshot
+    };
+  } finally {
+    await page.close().catch(() => {});
+  }
 }
 
 export async function capturePreviewSnapshot({

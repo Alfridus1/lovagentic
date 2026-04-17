@@ -18,12 +18,14 @@ import {
   capturePreviewSnapshot,
   clickChatAction,
   clickQueueResume,
+  compareDashboardProjectState,
   connectProjectDomain,
   connectProjectGitProvider,
   clickQuestionAction,
   clickRuntimeErrorAction,
   disconnectProjectGitProvider,
   ensureSignedIn,
+  getDashboardProjectState,
   fillPrompt,
   getDashboardState,
   getCurrentPromptMode,
@@ -44,7 +46,9 @@ import {
   launchLovableContext,
   listChatActions,
   publishProject,
+  pollDashboardProjectState,
   readFirebaseAuthUsers,
+  readUrlTextSnapshot,
   reconnectProjectGitProvider,
   runCreateFlow,
   setPromptMode,
@@ -67,18 +71,26 @@ import {
   DEFAULT_IDLE_POLL_MS,
   DEFAULT_IDLE_TIMEOUT_MS,
   getPromptTurnPostSubmitTimeoutMs,
+  planPromptSequence,
   parseAssertionLines,
   shouldUseLenientPromptAck
 } from "./orchestration.js";
 import { pathExists, seedDesktopProfileIntoPlaywrightDefault } from "./profile.js";
-import { buildCreateUrl, normalizeTargetUrl } from "./url.js";
+import {
+  buildCreateUrl,
+  buildPreviewRouteUrl,
+  getVerificationScreenshotFilename,
+  normalizePreviewRoute,
+  normalizeTargetUrl,
+  slugifyPreviewRoute
+} from "./url.js";
 
 const program = new Command();
 
 program
   .name("lovagentic")
   .description("Prototype CLI for steering Lovable from the local machine.")
-  .version("0.1.0");
+  .version("0.1.4");
 
 program
   .command("doctor")
@@ -561,13 +573,21 @@ program
   .description("Open a Lovable project page in a persistent browser and submit a prompt.")
   .argument("<target-url>", "Lovable project URL")
   .argument("[prompt]", "Optional follow-up prompt")
+  .option("--prompt-file <path>", "Read the prompt text from a local file")
   .option("--profile-dir <path>", "Override the CLI browser profile path")
   .option("--seed-desktop-session", "Refresh the Playwright profile from the desktop app before launch", false)
   .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
   .option("--headless", "Run headlessly instead of opening a visible browser", false)
   .option("--keep-open", "Leave the browser window open after prompt submission", false)
   .option("--mode <mode>", "Switch Lovable to build or plan before sending")
+  .option("--dry-run", "Print prompt size, chunking plan, and warnings without opening a browser", false)
+  .option("--chunked", "Force multipart prompt delivery even when the prompt might fit in one chunk", false)
+  .option("--split-by <mode>", "Split multipart prompts by character count or markdown headings (chars|markdown)")
   .option("--verify", "Capture preview screenshots after the prompt persisted", false)
+  .option("--verify-effect", "Poll dashboard metadata until Lovable records an actual edit for the target project", false)
+  .option("--verify-timeout-ms <ms>", "How long to wait for editCount / lastEditedAt to advance", parseInteger, 180000)
+  .option("--verify-route <path>", "Preview route to inspect after an edit is detected")
+  .option("--verify-expect-text <text>", "Required preview text for --verify-effect route checks", collectValues, [])
   .option("--verify-output-dir <path>", "Directory for post-prompt preview screenshots and summary output")
   .option("--verify-desktop-only", "Only capture the desktop preview after the prompt", false)
   .option("--verify-mobile-only", "Only capture the mobile preview after the prompt", false)
@@ -596,11 +616,41 @@ program
     600000
   )
   .action(async (targetUrl, prompt, options) => {
+    const promptText = await resolveInitialPrompt({
+      prompt,
+      promptFile: options.promptFile
+    });
     const profileDir = getProfileDir(options.profileDir);
     const attachmentPaths = await resolveAttachmentPaths(options.file);
-    if (!hasText(prompt) && attachmentPaths.length === 0) {
+    if (!hasText(promptText) && attachmentPaths.length === 0) {
       throw new Error("Pass a prompt, --file, or both.");
     }
+    if ((options.verifyRoute && options.verifyExpectText.length === 0) ||
+      (!options.verifyRoute && options.verifyExpectText.length > 0)) {
+      throw new Error("Use --verify-route together with at least one --verify-expect-text value.");
+    }
+
+    const promptPlan = hasText(promptText)
+      ? planPromptSequence(promptText, {
+        autoSplit: Boolean(options.autoSplit),
+        chunked: Boolean(options.chunked),
+        splitBy: options.splitBy
+      })
+      : null;
+
+    if (options.dryRun) {
+      printPromptDryRun({
+        targetUrl,
+        prompt: promptText,
+        promptPlan,
+        attachmentPaths,
+        autoSplit: Boolean(options.autoSplit),
+        chunked: Boolean(options.chunked),
+        splitBy: options.splitBy
+      });
+      return;
+    }
+
     if (options.seedDesktopSession) {
       await seedDesktopProfileIntoPlaywrightDefault({
         fromDir: getDesktopProfileDir(options.desktopProfileDir),
@@ -632,11 +682,25 @@ program
         console.log(`Lovable mode ready: ${modeResult.currentMode}`);
       }
 
+      let verifyEffectBaseline = null;
+      if (options.verifyEffect) {
+        verifyEffectBaseline = await loadDashboardProjectMetadata(context, normalizedUrl);
+        if (!verifyEffectBaseline.project) {
+          throw new Error("Target project was not found in the Lovable dashboard metadata feed.");
+        }
+
+        console.log(
+          `Verify-effect baseline: editCount=${verifyEffectBaseline.project.editCount ?? "unknown"} lastEditedAt=${verifyEffectBaseline.project.lastEditedAt || "unknown"}`
+        );
+      }
+
       const promptSequence = await runPromptSequence(page, {
         normalizedUrl,
-        prompt,
+        prompt: promptText,
         attachmentPaths,
         autoSplit: Boolean(options.autoSplit),
+        chunked: Boolean(options.chunked),
+        splitBy: options.splitBy,
         allowFragment: Boolean(options.allowFragment),
         selector: options.selector,
         submitSelector: options.submitSelector,
@@ -669,6 +733,24 @@ program
           }
         } else {
           console.log("Lovable is waiting for an answer. Use `questions` / `question-answer`, or re-run with --answer-question.");
+        }
+      }
+
+      if (options.verifyEffect) {
+        const verifyEffect = await verifyPromptEffect({
+          context,
+          page,
+          normalizedUrl,
+          baseline: verifyEffectBaseline.project,
+          lookup: verifyEffectBaseline.lookup,
+          timeoutMs: options.verifyTimeoutMs,
+          route: options.verifyRoute,
+          expectText: options.verifyExpectText,
+          settleMs: options.verifySettleMs
+        });
+        printVerifyEffectResult(verifyEffect);
+        if (!verifyEffect.detected) {
+          throw new Error(formatVerifyEffectError(verifyEffect));
         }
       }
 
@@ -1982,6 +2064,83 @@ addProjectSessionOptions(
 
 addProjectSessionOptions(
   program
+    .command("status")
+    .description("Read dashboard metadata, git status, and preview reachability for a Lovable project.")
+    .argument("<target-url>", "Lovable project URL")
+)
+  .option("--provider <name>", "Git provider to inspect", "github")
+  .option("--timeout-ms <ms>", "How long to wait for git and preview surfaces", parseInteger, 60_000)
+  .option("--dashboard-timeout-ms <ms>", "How long to wait for the dashboard project feed", parseInteger, 20_000)
+  .option("--dashboard-poll-ms <ms>", "Polling interval while waiting for the dashboard feed", parseInteger, 250)
+  .option("--page-size <n>", "Pagination size for dashboard project requests", parseInteger, 100)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ context, page, normalizedUrl }) => {
+      const projectId = normalizedUrl.match(/\/projects\/([^/?#]+)/)?.[1] || null;
+      if (!projectId) {
+        throw new Error("Expected a Lovable project URL.");
+      }
+
+      const dashboardState = await loadDashboardProjectMetadata(context, normalizedUrl, {
+        timeoutMs: options.dashboardTimeoutMs,
+        pollMs: options.dashboardPollMs,
+        pageSize: options.pageSize
+      });
+      const project = dashboardState.project;
+      if (!project) {
+        throw new Error("Target project was not found in the Lovable dashboard metadata feed.");
+      }
+
+      const gitState = await getProjectGitState(page, {
+        projectUrl: normalizedUrl,
+        provider: options.provider,
+        timeoutMs: options.timeoutMs
+      });
+      const previewInfo = await getProjectPreviewInfo(page, {
+        timeoutMs: options.timeoutMs
+      });
+      const previewRootUrl = buildPreviewRouteUrl(previewInfo.src, "/");
+      const previewHead = await probePreviewUrl(previewRootUrl);
+
+      const state = {
+        projectUrl: normalizedUrl,
+        projectId,
+        title: project.title,
+        slug: project.slug,
+        workspaceName: project.workspaceName || null,
+        editCount: project.editCount,
+        lastEditedAt: project.lastEditedAt,
+        updatedAt: project.updatedAt,
+        lastViewedAt: project.lastViewedAt,
+        published: project.published,
+        liveUrl: project.liveUrl || null,
+        git: {
+          connected: gitState.connected,
+          repository: gitState.repository,
+          branch: gitState.branch,
+          provider: gitState.provider
+        },
+        preview: {
+          sourceUrl: redactPreviewUrl(previewInfo.src),
+          rootUrl: redactPreviewUrl(previewRootUrl),
+          headStatus: previewHead.status,
+          headOk: previewHead.ok,
+          finalUrl: previewHead.finalUrl ? redactPreviewUrl(previewHead.finalUrl) : null,
+          routeCountDetected: null
+        }
+      };
+
+      if (options.json) {
+        console.log(JSON.stringify(state, null, 2));
+        return;
+      }
+
+      printProjectStatusState(state);
+    });
+  });
+
+addProjectSessionOptions(
+  program
     .command("code")
     .description("Read the connected GitHub repository as a pragmatic Code-surface fallback.")
     .argument("<target-url>", "Lovable project URL")
@@ -2295,6 +2454,7 @@ program
   .option("--output-dir <path>", "Directory for preview screenshots and summary output")
   .option("--desktop-only", "Only capture the desktop preview", false)
   .option("--mobile-only", "Only capture the mobile preview", false)
+  .option("--route <path>", "Capture a specific preview route; repeat for multiple routes", collectValues, [])
   .option("--headed", "Run the extraction and preview captures visibly", false)
   .option("--no-wait-for-idle", "Skip waiting for Lovable to become idle before preview capture")
   .option("--auto-resume", "Automatically click Resume queue / Continue queue while waiting for idle", false)
@@ -2357,6 +2517,8 @@ program
         failOnConsole: Boolean(options.failOnConsole),
         expectText: options.expectText,
         forbidText: options.forbidText,
+        routes: getVerificationRoutes(options.route),
+        explicitRoutes: Array.isArray(options.route) && options.route.length > 0,
         sourceLabel: "Preview"
       });
     } finally {
@@ -2516,6 +2678,292 @@ function getVerifyVariants({
   }
 
   return ["desktop", "mobile"];
+}
+
+function getVerificationRoutes(routes = []) {
+  const normalizedRoutes = (Array.isArray(routes) ? routes : [])
+    .map((route) => normalizePreviewRoute(route))
+    .filter(Boolean);
+
+  if (normalizedRoutes.length === 0) {
+    return ["/"];
+  }
+
+  return Array.from(new Set(normalizedRoutes));
+}
+
+function getPromptStrategyRecommendation({
+  promptPlan,
+  autoSplit = true,
+  chunked = false,
+  splitBy
+} = {}) {
+  if (!promptPlan) {
+    return "No prompt text supplied. This run would send attachments only.";
+  }
+
+  if (!autoSplit) {
+    return "Single-shot send requested via `--no-auto-split`. Pair it with `--verify-effect` when you want one Lovable turn with a post-submit check.";
+  }
+
+  if (chunked && promptPlan.strategy === "markdown") {
+    return "Chunked markdown delivery is active. Keep each `##` block self-contained so Lovable can act on every chunk independently.";
+  }
+
+  if (chunked) {
+    return "Chunked delivery is active. Review the emitted chunks below before sending them live.";
+  }
+
+  if (splitBy === "markdown" && promptPlan.strategy === "markdown") {
+    return "Markdown-aware chunking is selected. Top-level headings define the chunk boundaries.";
+  }
+
+  if (promptPlan.autoSplitTriggered) {
+    return "The prompt will be split automatically under the current rules. Use `--no-auto-split` if you intentionally want a single Lovable turn.";
+  }
+
+  return "The prompt fits in one chunk under the current rules. Use `--no-auto-split --verify-effect` for the most direct single-shot flow.";
+}
+
+function printPromptDryRun({
+  targetUrl,
+  prompt,
+  promptPlan,
+  attachmentPaths = [],
+  autoSplit = true,
+  chunked = false,
+  splitBy
+} = {}) {
+  console.log(`Dry run target: ${normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL)}`);
+
+  if (!hasText(prompt)) {
+    console.log("Prompt text: (none)");
+    console.log(`Attachments: ${attachmentPaths.length ? attachmentPaths.join(", ") : "(none)"}`);
+    console.log("This run would send attachments only.");
+    return;
+  }
+
+  console.log(`Prompt chars: ${promptPlan.normalizedPrompt.length}`);
+  console.log(`Estimated tokens: ${promptPlan.estimatedTokens}`);
+  console.log(`Split strategy: ${promptPlan.strategy}`);
+  console.log(`Chunks to send: ${promptPlan.sequence.length}`);
+  console.log(`Auto-split enabled: ${autoSplit ? "yes" : "no"}`);
+  console.log(`Chunked forced: ${chunked ? "yes" : "no"}`);
+  console.log(`Requested split mode: ${splitBy || "(default)"}`);
+  console.log(`Recommendation: ${getPromptStrategyRecommendation({
+    promptPlan,
+    autoSplit,
+    chunked,
+    splitBy
+  })}`);
+
+  if (promptPlan.warnings.length > 0) {
+    console.log("Warnings:");
+    promptPlan.warnings.forEach((warning) => {
+      console.log(`- ${warning}`);
+    });
+  }
+
+  promptPlan.sequence.forEach((entry) => {
+    console.log(`--- chunk ${entry.index}/${entry.total} ---`);
+    console.log(entry.prompt);
+  });
+
+  if (attachmentPaths.length > 0) {
+    console.log(`Attachments: ${attachmentPaths.join(", ")}`);
+  }
+}
+
+async function loadDashboardProjectMetadata(context, projectUrl, {
+  timeoutMs = 20_000,
+  pollMs = 250,
+  pageSize = 100
+} = {}) {
+  const page = await context.newPage();
+  const normalizedUrl = normalizeTargetUrl(projectUrl, DEFAULT_BASE_URL);
+  const projectId = normalizedUrl.match(/\/projects\/([^/?#]+)/)?.[1];
+
+  if (!projectId) {
+    await page.close().catch(() => {});
+    throw new Error("Expected a Lovable project URL.");
+  }
+
+  try {
+    return await getDashboardProjectState(page, {
+      projectId,
+      dashboardUrl: new URL("/dashboard", DEFAULT_BASE_URL).toString(),
+      timeoutMs,
+      pollMs,
+      pageSize
+    });
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+async function probePreviewUrl(url) {
+  try {
+    const response = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow"
+    });
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      finalUrl: response.url
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: null,
+      finalUrl: null,
+      error: error?.message || String(error)
+    };
+  }
+}
+
+function previewTextMatches(snapshot, expectedTexts = []) {
+  const haystack = String(snapshot?.bodyText || "").toLowerCase();
+  const missingExpectedTexts = expectedTexts.filter((value) => {
+    return !haystack.includes(String(value || "").trim().toLowerCase());
+  });
+
+  return {
+    matched: missingExpectedTexts.length === 0,
+    missingExpectedTexts
+  };
+}
+
+async function waitForPreviewTextMatch(context, captureUrl, {
+  route,
+  expectedTexts = [],
+  timeoutMs = 180_000,
+  settleMs = 4_000
+} = {}) {
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
+  let intervalMs = 3_000;
+  let lastResult = null;
+  const routeUrl = buildPreviewRouteUrl(captureUrl, route);
+
+  while (Date.now() <= deadline) {
+    const probe = await readUrlTextSnapshot(context, {
+      url: routeUrl,
+      settleMs
+    });
+    const match = previewTextMatches(probe.snapshot, expectedTexts);
+
+    lastResult = {
+      route: normalizePreviewRoute(route),
+      url: redactPreviewUrl(routeUrl),
+      status: probe.status,
+      finalUrl: redactPreviewUrl(probe.finalUrl),
+      snapshot: probe.snapshot,
+      ...match
+    };
+
+    if (match.matched) {
+      return {
+        matched: true,
+        durationMs: Date.now() - startedAt,
+        ...lastResult
+      };
+    }
+
+    if (Date.now() >= deadline) {
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    intervalMs = Math.min(20_000, Math.round(intervalMs * 1.6));
+  }
+
+  return {
+    matched: false,
+    durationMs: Date.now() - startedAt,
+    ...lastResult
+  };
+}
+
+async function verifyPromptEffect({
+  context,
+  page,
+  normalizedUrl,
+  baseline,
+  lookup,
+  timeoutMs = 180_000,
+  route,
+  expectText = [],
+  settleMs = 4_000
+} = {}) {
+  const pollPage = await context.newPage();
+
+  try {
+    const projectId = normalizedUrl.match(/\/projects\/([^/?#]+)/)?.[1];
+    if (!projectId) {
+      throw new Error("Expected a Lovable project URL.");
+    }
+
+    const pollResult = await pollDashboardProjectState(pollPage, {
+      projectId,
+      baseline,
+      lookup,
+      timeoutMs
+    });
+    const verifyEffect = {
+      baseline,
+      final: pollResult.final,
+      comparison: compareDashboardProjectState(baseline, pollResult.final),
+      detected: pollResult.detected,
+      durationMs: pollResult.durationMs,
+      previewCheck: null
+    };
+
+    if (!pollResult.detected || !route || expectText.length === 0) {
+      return verifyEffect;
+    }
+
+    const previewInfo = await getProjectPreviewInfo(page);
+    const remainingTimeoutMs = Math.max(5_000, timeoutMs - pollResult.durationMs);
+    const previewCheck = await waitForPreviewTextMatch(context, previewInfo.src, {
+      route,
+      expectedTexts: expectText,
+      timeoutMs: remainingTimeoutMs,
+      settleMs
+    });
+    verifyEffect.previewCheck = previewCheck;
+    verifyEffect.detected = verifyEffect.detected && previewCheck.matched;
+    verifyEffect.durationMs = pollResult.durationMs + previewCheck.durationMs;
+
+    return verifyEffect;
+  } finally {
+    await pollPage.close().catch(() => {});
+  }
+}
+
+function printVerifyEffectResult(verifyEffect) {
+  const final = verifyEffect.final || {};
+  console.log(`Verify-effect detected: ${verifyEffect.detected ? "yes" : "no"}`);
+  console.log(`Verify-effect duration: ${verifyEffect.durationMs}ms`);
+  console.log(`Final editCount: ${final.editCount ?? "unknown"}`);
+  console.log(`Final lastEditedAt: ${final.lastEditedAt || "unknown"}`);
+
+  if (verifyEffect.previewCheck) {
+    console.log(`Preview route check: ${verifyEffect.previewCheck.route}`);
+    console.log(`Preview route matched: ${verifyEffect.previewCheck.matched ? "yes" : "no"}`);
+    if (verifyEffect.previewCheck.missingExpectedTexts?.length) {
+      console.log(`Preview still missing: ${verifyEffect.previewCheck.missingExpectedTexts.join(", ")}`);
+    }
+  }
+}
+
+function formatVerifyEffectError(verifyEffect) {
+  if (verifyEffect.previewCheck && !verifyEffect.previewCheck.matched) {
+    return `Lovable recorded an edit, but preview route ${verifyEffect.previewCheck.route} never showed the expected text (${verifyEffect.previewCheck.missingExpectedTexts.join(", ")}).`;
+  }
+
+  return "No edits detected in dashboard metadata within the verify-effect timeout. editCount and lastEditedAt stayed unchanged.";
 }
 
 function getSpeedDevices(value = "both") {
@@ -2858,6 +3306,26 @@ function printGitState(state) {
   console.log(`Branch: ${state.branch || "(unknown)"}`);
   console.log(`Account: ${state.account || "(unknown)"}`);
   console.log(`Available actions: ${state.availableActions.join(", ") || "(none)"}`);
+}
+
+function printProjectStatusState(state) {
+  console.log(`Project: ${state.title || "(unknown)"}${state.slug ? ` [${state.slug}]` : ""}`);
+  console.log(`Project id: ${state.projectId}`);
+  console.log(`Workspace: ${state.workspaceName || "(unknown)"}`);
+  console.log(`Edit count: ${state.editCount ?? "unknown"}`);
+  console.log(`Last edited: ${state.lastEditedAt || "(unknown)"}`);
+  console.log(`Updated at: ${state.updatedAt || "(unknown)"}`);
+  console.log(`Last viewed: ${state.lastViewedAt || "(unknown)"}`);
+  console.log(`Published: ${state.published ? "yes" : "no"}`);
+  console.log(`Live URL: ${state.liveUrl || "(not published)"}`);
+  console.log(`Git connected: ${state.git.connected ? "yes" : "no"}`);
+  console.log(`Git repository: ${state.git.repository || "(none)"}`);
+  console.log(`Git branch: ${state.git.branch || "(unknown)"}`);
+  console.log(`Preview source: ${state.preview.sourceUrl}`);
+  console.log(`Preview root URL: ${state.preview.rootUrl}`);
+  console.log(`Preview HEAD status: ${state.preview.headStatus ?? "unknown"}`);
+  console.log(`Preview reachable: ${state.preview.headOk ? "yes" : "no"}`);
+  console.log(`Detected routes: ${state.preview.routeCountDetected ?? "(not sampled)"}`);
 }
 
 function printCodeState(state) {
@@ -3301,6 +3769,8 @@ async function runPromptSequence(page, {
   prompt,
   attachmentPaths = [],
   autoSplit = true,
+  chunked = false,
+  splitBy,
   allowFragment = false,
   selector,
   submitSelector,
@@ -3325,7 +3795,9 @@ async function runPromptSequence(page, {
     : [];
   const parts = hasPrompt
     ? buildPromptSequence(normalizedPrompt, {
-      autoSplit
+      autoSplit,
+      chunked,
+      splitBy
     })
     : [{
       index: 1,
@@ -3694,6 +4166,8 @@ async function runPreviewVerification({
   headless,
   settleMs,
   variants,
+  routes = ["/"],
+  explicitRoutes = false,
   failOnConsole = false,
   expectText = [],
   forbidText = [],
@@ -3708,6 +4182,8 @@ async function runPreviewVerification({
     headless,
     settleMs,
     variants,
+    routes,
+    explicitRoutes,
     failOnConsole,
     expectText,
     forbidText,
@@ -3724,6 +4200,8 @@ async function runUrlVerification({
   headless,
   settleMs,
   variants,
+  routes = ["/"],
+  explicitRoutes = false,
   failOnConsole = false,
   expectText = [],
   forbidText = [],
@@ -3737,10 +4215,12 @@ async function runUrlVerification({
 
   console.log(`${sourceLabel} source found: ${redactPreviewUrl(captureUrl)}`);
 
+  const normalizedRoutes = getVerificationRoutes(routes);
   const summary = {
     projectUrl: targetUrl,
     [summarySourceKey]: redactPreviewUrl(captureUrl),
     settings: {
+      routes: normalizedRoutes,
       variants,
       settleMs,
       headless,
@@ -3748,43 +4228,75 @@ async function runUrlVerification({
       expectText,
       forbidText
     },
-    captures: []
+    captures: [],
+    routes: []
   };
 
   await fs.mkdir(outputDir, { recursive: true });
 
-  for (const variant of variants) {
-    const isMobile = variant === "mobile";
-    const screenshotPath = path.resolve(outputDir, `${variant}.png`);
-    const result = await capturePreviewSnapshot({
-      previewUrl: captureUrl,
-      outputPath: screenshotPath,
-      viewport: isMobile
-        ? { width: 390, height: 844 }
-        : { width: 1440, height: 900 },
-      isMobile,
-      hasTouch: isMobile,
-      headless,
-      settleMs,
-      expectText,
-      forbidText
+  for (const route of normalizedRoutes) {
+    const captureRouteUrl = buildPreviewRouteUrl(captureUrl, route);
+    const routeEntry = {
+      route,
+      captureSource: redactPreviewUrl(captureRouteUrl),
+      captures: []
+    };
+
+    console.log(`${sourceLabel} route ${route}: ${redactPreviewUrl(captureRouteUrl)}`);
+
+    for (const variant of variants) {
+      const isMobile = variant === "mobile";
+      const screenshotFilename = getVerificationScreenshotFilename(variant, route, {
+        explicitRoute: explicitRoutes
+      });
+      const screenshotPath = path.resolve(outputDir, screenshotFilename);
+      const result = await capturePreviewSnapshot({
+        previewUrl: captureRouteUrl,
+        outputPath: screenshotPath,
+        viewport: isMobile
+          ? { width: 390, height: 844 }
+          : { width: 1440, height: 900 },
+        isMobile,
+        hasTouch: isMobile,
+        headless,
+        settleMs,
+        expectText,
+        forbidText
+      });
+
+      console.log(`${capitalize(variant)} screenshot (${route}): ${result.outputPath}`);
+      console.log(
+        `${capitalize(variant)} ${sourceLabel.toLowerCase()} status (${route}): ${result.status ?? "unknown"}, console issues: ${result.consoleEntries.length}, page errors: ${result.pageErrors.length}, failed requests: ${result.failedRequests.length}, body text length: ${result.snapshot.bodyTextLength}`
+      );
+
+      const captureEntry = {
+        route,
+        variant,
+        screenshotPath: result.outputPath,
+        status: result.status,
+        finalUrl: result.finalUrl,
+        consoleEntries: result.consoleEntries,
+        pageErrors: result.pageErrors,
+        failedRequests: result.failedRequests,
+        snapshot: result.snapshot
+      };
+
+      routeEntry.captures.push(captureEntry);
+      summary.captures.push(captureEntry);
+    }
+
+    const blockingCapture = routeEntry.captures.find((capture) => {
+      return Boolean(getBlockingReason(capture, { failOnConsole }));
     });
 
-    console.log(`${capitalize(variant)} screenshot: ${result.outputPath}`);
-    console.log(
-      `${capitalize(variant)} ${sourceLabel.toLowerCase()} status: ${result.status ?? "unknown"}, console issues: ${result.consoleEntries.length}, page errors: ${result.pageErrors.length}, failed requests: ${result.failedRequests.length}, body text length: ${result.snapshot.bodyTextLength}`
-    );
+    if (blockingCapture) {
+      routeEntry.blocking = {
+        variant: blockingCapture.variant,
+        reason: getBlockingReason(blockingCapture, { failOnConsole })
+      };
+    }
 
-    summary.captures.push({
-      variant,
-      screenshotPath: result.outputPath,
-      status: result.status,
-      finalUrl: result.finalUrl,
-      consoleEntries: result.consoleEntries,
-      pageErrors: result.pageErrors,
-      failedRequests: result.failedRequests,
-      snapshot: result.snapshot
-    });
+    summary.routes.push(routeEntry);
   }
 
   const blockingCapture = summary.captures.find((capture) => {
@@ -3793,6 +4305,7 @@ async function runUrlVerification({
 
   if (blockingCapture) {
     summary.blocking = {
+      route: blockingCapture.route,
       variant: blockingCapture.variant,
       reason: getBlockingReason(blockingCapture, { failOnConsole })
     };
