@@ -41,6 +41,7 @@ Commands:
   knowledge [options] <target-url>                 Inspect or update project and workspace knowledge.
   workspace [options] <target-url>                 Inspect workspace and account settings surfaces without mutating them.
   git [options] <target-url>                       Inspect or manage the project's Git/GitHub connection.
+  status [options] <target-url>                    Read dashboard metadata, git status, and preview reachability for a Lovable project.
   code [options] <target-url>                      Read the connected GitHub repository as a pragmatic Code-surface fallback.
   wait-for-idle [options] <target-url>             Wait until Lovable is idle: no Thinking state, no paused queue, no open questions, and no visible runtime error.
   speed [options] <target-url>                     Run Lighthouse against the current project preview as a pragmatic Speed-surface fallback.
@@ -76,6 +77,7 @@ Commands:
 - [`knowledge`](#knowledge)
 - [`workspace`](#workspace)
 - [`git`](#git)
+- [`status`](#status)
 - [`code`](#code)
 - [`wait-for-idle`](#wait-for-idle)
 - [`speed`](#speed)
@@ -226,6 +228,7 @@ Arguments:
   prompt                          Optional follow-up prompt
 
 Options:
+  --prompt-file <path>            Read the prompt text from a local file
   --profile-dir <path>            Override the CLI browser profile path
   --seed-desktop-session          Refresh the Playwright profile from the
                                   desktop app before launch (default: false)
@@ -235,8 +238,23 @@ Options:
   --keep-open                     Leave the browser window open after prompt
                                   submission (default: false)
   --mode <mode>                   Switch Lovable to build or plan before sending
+  --dry-run                       Print prompt size, chunking plan, and warnings
+                                  without opening a browser (default: false)
+  --chunked                       Force multipart prompt delivery even when the
+                                  prompt might fit in one chunk (default: false)
+  --split-by <mode>               Split multipart prompts by character count or
+                                  markdown headings (chars|markdown)
   --verify                        Capture preview screenshots after the prompt
                                   persisted (default: false)
+  --verify-effect                 Poll dashboard metadata until Lovable records
+                                  an actual edit for the target project
+                                  (default: false)
+  --verify-timeout-ms <ms>        How long to wait for editCount / lastEditedAt
+                                  to advance (default: 180000)
+  --verify-route <path>           Preview route to inspect after an edit is
+                                  detected
+  --verify-expect-text <text>     Required preview text for --verify-effect
+                                  route checks (default: [])
   --verify-output-dir <path>      Directory for post-prompt preview screenshots
                                   and summary output
   --verify-desktop-only           Only capture the desktop preview after the
@@ -895,6 +913,37 @@ Options:
   -h, --help                    display help for command
 ```
 
+## status
+
+```text
+Usage: lovagentic status [options] <target-url>
+
+Read dashboard metadata, git status, and preview reachability for a Lovable
+project.
+
+Arguments:
+  target-url                    Lovable project URL
+
+Options:
+  --profile-dir <path>          Override the CLI browser profile path
+  --seed-desktop-session        Refresh the Playwright profile from the desktop
+                                app before launch (default: false)
+  --desktop-profile-dir <path>  Override the Lovable desktop profile path
+  --headless                    Run headlessly instead of opening a visible
+                                browser (default: false)
+  --provider <name>             Git provider to inspect (default: "github")
+  --timeout-ms <ms>             How long to wait for git and preview surfaces
+                                (default: 60000)
+  --dashboard-timeout-ms <ms>   How long to wait for the dashboard project feed
+                                (default: 20000)
+  --dashboard-poll-ms <ms>      Polling interval while waiting for the dashboard
+                                feed (default: 250)
+  --page-size <n>               Pagination size for dashboard project requests
+                                (default: 100)
+  --json                        Print machine-readable JSON (default: false)
+  -h, --help                    display help for command
+```
+
 ## code
 
 ```text
@@ -1062,6 +1111,8 @@ Options:
   --desktop-only                Only capture the desktop preview (default:
                                 false)
   --mobile-only                 Only capture the mobile preview (default: false)
+  --route <path>                Capture a specific preview route; repeat for
+                                multiple routes (default: [])
   --headed                      Run the extraction and preview captures visibly
                                 (default: false)
   --no-wait-for-idle            Skip waiting for Lovable to become idle before

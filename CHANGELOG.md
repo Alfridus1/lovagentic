@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-04-17
+
+### Added
+
+- `verify --route <path>` for per-route preview captures with route-aware screenshot filenames and per-route summary output
+- `prompt --verify-effect` for dashboard-backed post-submit verification using `editCount` / `lastEditedAt`
+- `prompt --dry-run` for prompt sizing, token estimation, warning output, and chunk preview without opening a browser
+- `status <target-url>` for dashboard metadata, publish state, git connection state, and preview reachability in one command
+- `prompt --split-by markdown` plus `--chunked` to split multipart prompts on `##` or `###` headings when the prompt is already structured
+
+### Changed
+
+- Multipart prompt sends no longer prepend the old "Do not implement yet" shim; every emitted chunk is now sent as a standalone instruction
+- `prompt --no-auto-split` is now the explicit single-shot escape hatch for users who want one Lovable turn
+- README examples now document verified-action workflows and the recommended single-shot `--verify-effect` flow
+
+## [0.1.3] - 2026-04-17
+
 ### Added
 
 - Local file attachment support for prompt-driven Lovable flows

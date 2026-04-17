@@ -57,17 +57,19 @@ That keeps the repo maintainable and avoids coupling to private desktop internal
 
 - Lovable session bootstrap and profile seeding
 - dashboard project and workspace listing
+- dashboard-backed project status reads
 - project creation from official build URLs
 - prompt submission with server-side acceptance checks
 - `build` / `plan` mode switching
-- prompt auto-splitting for large requests
+- prompt auto-splitting, dry-run sizing, and markdown-aware chunk planning
+- prompt-effect verification against dashboard metadata plus optional preview text gates
 - queue pause detection and optional auto-resume
 - question-card reading and answering
 - proposal action discovery and clicking
 - runtime error inspection and `Try to fix`
 - findings extraction from Lovable's security pane
 - `wait-for-idle` orchestration
-- preview verification with screenshots, layout heuristics, console checks, and text assertions
+- preview verification with multi-route screenshots, layout heuristics, console checks, and text assertions
 - publish, publish settings, and domain management
 - toolbar, project settings, workspace settings, git, code, knowledge, and speed surfaces
 - iterative `fidelity-loop` repair flows
@@ -159,6 +161,19 @@ npm run start -- verify "https://lovable.dev/projects/your-project" \
   --seed-desktop-session
 ```
 
+Check whether Lovable actually recorded edits for a prompt:
+
+```bash
+npm run start -- prompt "https://lovable.dev/projects/your-project" \
+  --prompt-file ./docs.md \
+  --profile-dir /tmp/lovagentic-profile \
+  --seed-desktop-session \
+  --verify-effect \
+  --verify-route /docs \
+  --verify-expect-text "Getting Started" \
+  --no-auto-split
+```
+
 ## Authentication and session model
 
 The CLI is only useful when the Playwright profile contains a real Lovable session.
@@ -207,6 +222,7 @@ Important constraints:
 | Command | Purpose |
 | --- | --- |
 | `verify` | Capture preview screenshots and a verification summary |
+| `status` | Read dashboard metadata, git connection state, and preview reachability |
 | `publish` | Publish or update a project |
 | `publish-settings` | Inspect or update website info and visibility |
 | `domain` | Inspect or update domain settings |
@@ -219,6 +235,65 @@ Important constraints:
 | `speed` | Run Lighthouse against the current preview URL |
 
 Run `npm run help` or `npm run start -- --help` for the full command list.
+
+## v0.1.4 — Verified actions
+
+### Verify specific preview routes
+
+Capture both desktop and mobile screenshots for subroutes instead of only the preview root:
+
+```bash
+npm run start -- verify "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovagentic-profile \
+  --seed-desktop-session \
+  --route /docs \
+  --route /docs/start/install \
+  --expect-text "Getting Started"
+```
+
+Explicit routes write route-aware filenames such as `desktop__docs.png` and `mobile__docs_start_install.png`, while the default root-only run still uses `desktop.png` and `mobile.png`.
+
+### Check whether a prompt really landed
+
+`prompt --verify-effect` captures a dashboard baseline before submit, then polls Lovable's project metadata until `editCount` or `lastEditedAt` advances:
+
+```bash
+npm run start -- prompt "https://lovable.dev/projects/your-project" \
+  --prompt-file ./docs.md \
+  --profile-dir /tmp/lovagentic-profile \
+  --seed-desktop-session \
+  --verify-effect \
+  --verify-route /docs \
+  --verify-expect-text "Getting Started" \
+  --no-auto-split
+```
+
+That is the recommended single-shot flow when the prompt comfortably fits in one Lovable turn and you want a real post-submit check instead of a false-positive success.
+
+### Inspect prompt size before sending
+
+Use `--dry-run` to print prompt size, an estimated token count, warnings, and the exact chunks that would be sent without opening a browser:
+
+```bash
+npm run start -- prompt "https://lovable.dev/projects/your-project" \
+  --prompt-file ./docs.md \
+  --dry-run \
+  --chunked \
+  --split-by markdown
+```
+
+If the prompt is over roughly 8 KB, the CLI warns that it exceeds Lovable's soft single-shot limit. Over roughly 32 KB, it strongly recommends splitting.
+
+### Read current project status
+
+Use `status` when you need the current edit counters, timestamps, publish state, git connection, and preview reachability in one read:
+
+```bash
+npm run start -- status "https://lovable.dev/projects/your-project" \
+  --profile-dir /tmp/lovagentic-profile \
+  --seed-desktop-session \
+  --json
+```
 
 ## Common workflows
 
@@ -249,7 +324,9 @@ npm run start -- prompt "https://lovable.dev/projects/your-project" \
   --mode plan
 ```
 
-If you deliberately keep a large prompt in a single Lovable turn with `--no-auto-split`, the CLI now gives larger prompts more time and can rely on server acceptance plus reload persistence before failing.
+Use `--dry-run` first if you want to see the exact chunk plan before the browser opens. If your prompt is already structured with `##` sections, `--chunked --split-by markdown` keeps those heading blocks together. Make each `##` block self-contained; Lovable no longer receives the old multipart "Do not implement yet" shim.
+
+If you deliberately keep a large prompt in a single Lovable turn with `--no-auto-split`, the CLI now gives larger prompts more time and can rely on server acceptance plus reload persistence before failing. Pair it with `--verify-effect` when you want a single-turn send plus a dashboard-backed confirmation.
 
 ### Attach local reference files to a prompt
 
