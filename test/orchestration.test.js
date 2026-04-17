@@ -5,12 +5,14 @@ import {
   buildPromptSequence,
   classifyIdleStateSnapshot,
   getPromptTurnPostSubmitTimeoutMs,
+  planPromptSequence,
   parseAssertionLines,
   shouldUseLenientPromptAck,
-  splitPromptIntoChunks
+  splitPromptIntoChunks,
+  splitPromptIntoMarkdownChunks
 } from "../src/orchestration.js";
 
-test("buildPromptSequence auto-splits large prompts at blank-line boundaries and wraps parts", () => {
+test("buildPromptSequence auto-splits large prompts at blank-line boundaries without multipart wrappers", () => {
   const prompt = [
     "SECTION 1",
     "A".repeat(80),
@@ -24,28 +26,20 @@ test("buildPromptSequence auto-splits large prompts at blank-line boundaries and
 
   const sequence = buildPromptSequence(prompt, {
     thresholdChars: 10,
-    maxChunkChars: 260
+    maxChunkChars: 170
   });
 
   assert.equal(sequence.length, 3);
   assert.equal(sequence[0].index, 1);
   assert.equal(sequence[0].total, 3);
   assert.equal(sequence[0].autoSplit, true);
-  assert.match(
-    sequence[0].prompt,
-    /This request is being sent in 3 parts due to Lovable prompt limits\./
-  );
-  assert.match(
-    sequence[1].prompt,
-    /Do not implement yet; wait for the final part\. Part 2\/3:/
-  );
-  assert.match(
-    sequence[2].prompt,
-    /This is the final part of the same request\. Use all parts together and now proceed\. Part 3\/3:/
-  );
+  assert.equal(sequence[0].prompt, sequence[0].rawPrompt);
+  assert.equal(sequence[1].prompt, sequence[1].rawPrompt);
+  assert.equal(sequence[2].prompt, sequence[2].rawPrompt);
   assert.match(sequence[0].prompt, /SECTION 1/);
   assert.match(sequence[1].prompt, /SECTION 2/);
   assert.match(sequence[2].prompt, /SECTION 3/);
+  assert.doesNotMatch(sequence[0].prompt, /Do not implement yet/i);
 });
 
 test("splitPromptIntoChunks falls back to line-based splitting for oversized blocks", () => {
@@ -64,6 +58,92 @@ test("splitPromptIntoChunks falls back to line-based splitting for oversized blo
   assert.equal(chunks[0], `line 1 ${"A".repeat(24)}`);
   assert.equal(chunks[1], `line 2 ${"B".repeat(24)}`);
   assert.equal(chunks[2], `line 3 ${"C".repeat(24)}`);
+});
+
+test("splitPromptIntoMarkdownChunks splits on level-two headings and ignores fenced code blocks", () => {
+  const prompt = [
+    "Intro context",
+    "",
+    "## Hero",
+    "Ship a stronger hero section.",
+    "",
+    "```md",
+    "## not-a-heading",
+    "```",
+    "",
+    "## Docs",
+    "Add an install checklist."
+  ].join("\n");
+
+  const result = splitPromptIntoMarkdownChunks(prompt);
+
+  assert.equal(result.usedFallback, false);
+  assert.equal(result.headingDepth, 2);
+  assert.equal(result.chunks.length, 2);
+  assert.match(result.chunks[0], /^Intro context/);
+  assert.match(result.chunks[0], /## Hero/);
+  assert.match(result.chunks[0], /## not-a-heading/);
+  assert.match(result.chunks[1], /## Docs/);
+});
+
+test("planPromptSequence uses markdown chunking when chunked prompts contain headings", () => {
+  const prompt = [
+    "## Hero",
+    "Refresh the hero copy.",
+    "",
+    "## Docs",
+    "Add getting started steps."
+  ].join("\n");
+
+  const plan = planPromptSequence(prompt, {
+    autoSplit: true,
+    chunked: true
+  });
+
+  assert.equal(plan.strategy, "markdown");
+  assert.equal(plan.sequence.length, 2);
+  assert.match(plan.sequence[0].prompt, /## Hero/);
+  assert.match(plan.sequence[1].prompt, /## Docs/);
+});
+
+test("planPromptSequence keeps long prompts single-shot when autoSplit is disabled", () => {
+  const prompt = [
+    "SECTION 1",
+    "A".repeat(320),
+    "",
+    "SECTION 2",
+    "B".repeat(320)
+  ].join("\n");
+
+  const plan = planPromptSequence(prompt, {
+    autoSplit: false
+  });
+
+  assert.equal(plan.sequence.length, 1);
+  assert.equal(plan.sequence[0].prompt, prompt);
+  assert.equal(plan.sequence[0].autoSplit, false);
+});
+
+test("planPromptSequence emits soft-limit warnings for large prompts", () => {
+  const prompt = "A".repeat(8_100);
+
+  const plan = planPromptSequence(prompt, {
+    autoSplit: false
+  });
+
+  assert.equal(plan.sequence.length, 1);
+  assert.match(plan.warnings[0], /soft single-shot limit/i);
+});
+
+test("planPromptSequence emits strong warnings for very large prompts", () => {
+  const prompt = "A".repeat(32_100);
+
+  const plan = planPromptSequence(prompt, {
+    autoSplit: false
+  });
+
+  assert.equal(plan.sequence.length, 1);
+  assert.match(plan.warnings[0], /strongly recommend splitting/i);
 });
 
 test("shouldUseLenientPromptAck returns true for longer single-part prompts", () => {

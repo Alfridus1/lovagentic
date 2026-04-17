@@ -4,11 +4,14 @@ export const DEFAULT_IDLE_STREAK_TARGET = 3;
 export const DEFAULT_PROMPT_AUTO_SPLIT_THRESHOLD_CHARS = 1_000;
 export const DEFAULT_PROMPT_AUTO_SPLIT_THRESHOLD_NON_EMPTY_LINES = 24;
 export const DEFAULT_PROMPT_AUTO_SPLIT_MAX_CHUNK_CHARS = 1_200;
+export const DEFAULT_PROMPT_MARKDOWN_HARD_CHUNK_CHARS = 50_000;
 export const DEFAULT_QUEUE_RESUME_ATTEMPTS = 3;
 export const DEFAULT_PROMPT_LENIENT_ACK_THRESHOLD_CHARS = 900;
 export const DEFAULT_PROMPT_LENIENT_ACK_THRESHOLD_NON_EMPTY_LINES = 16;
 export const DEFAULT_SINGLE_PROMPT_LENIENT_ACK_TIMEOUT_MS = 45_000;
 export const DEFAULT_FINAL_MULTIPART_PROMPT_TIMEOUT_MS = 60_000;
+export const PROMPT_SOFT_SINGLE_SHOT_LIMIT_CHARS = 8_000;
+export const PROMPT_STRONG_SPLIT_WARNING_CHARS = 32_000;
 
 export const QUEUE_RESUME_ACTION_LABELS = [
   "Resume queue",
@@ -97,51 +100,127 @@ function splitOversizedBlock(block, maxChunkChars) {
   return chunks.filter(Boolean);
 }
 
-function getPromptPartWrapper(partNumber, totalParts, isFinal) {
-  if (isFinal) {
-    return `This is the final part of the same request. Use all parts together and now proceed. Part ${partNumber}/${totalParts}:`;
+function normalizeSplitStrategy(splitBy) {
+  const normalized = String(splitBy || "").trim().toLowerCase();
+  if (!normalized) {
+    return null;
   }
 
-  return `This request is being sent in ${totalParts} parts due to Lovable prompt limits. Do not implement yet; wait for the final part. Part ${partNumber}/${totalParts}:`;
+  if (["chars", "char", "character", "character-count"].includes(normalized)) {
+    return "chars";
+  }
+
+  if (["markdown", "md"].includes(normalized)) {
+    return "markdown";
+  }
+
+  throw new Error(`Unsupported split strategy "${splitBy}". Use "chars" or "markdown".`);
 }
 
-function ensureWrappedChunksWithinLimit(rawChunks, maxChunkChars) {
-  const chunks = [...rawChunks];
+function isFenceDelimiter(line) {
+  return /^```/.test(String(line || "").trim());
+}
 
-  for (let guard = 0; guard < 100; guard += 1) {
-    let changed = false;
-    const totalParts = chunks.length;
+function getMarkdownHeadingDepth(lines) {
+  let inFence = false;
+  let hasLevel2 = false;
+  let hasLevel3 = false;
 
-    for (let index = 0; index < chunks.length; index += 1) {
-      const wrapper = getPromptPartWrapper(index + 1, totalParts, index + 1 === totalParts);
-      const allowedRawLength = Math.max(1, maxChunkChars - `${wrapper}\n\n`.length);
-      const currentChunk = chunks[index];
-
-      if (currentChunk.length <= allowedRawLength) {
-        continue;
-      }
-
-      const split = splitPromptIntoChunks(currentChunk, {
-        thresholdChars: 0,
-        thresholdNonEmptyLines: 0,
-        maxChunkChars: allowedRawLength
-      });
-
-      if (split.length <= 1 && split[0]?.length > allowedRawLength) {
-        return chunks;
-      }
-
-      chunks.splice(index, 1, ...split);
-      changed = true;
-      break;
+  for (const line of lines) {
+    const trimmed = String(line || "").trim();
+    if (isFenceDelimiter(trimmed)) {
+      inFence = !inFence;
+      continue;
     }
 
-    if (!changed) {
-      return chunks;
+    if (inFence) {
+      continue;
+    }
+
+    if (/^##(?!#)\s+\S/.test(trimmed)) {
+      hasLevel2 = true;
+      continue;
+    }
+
+    if (/^###(?!#)\s+\S/.test(trimmed)) {
+      hasLevel3 = true;
     }
   }
 
-  return chunks;
+  if (hasLevel2) {
+    return 2;
+  }
+
+  if (hasLevel3) {
+    return 3;
+  }
+
+  return null;
+}
+
+function splitMarkdownBlocks(prompt, headingDepth) {
+  const lines = normalizePromptInput(prompt).split("\n");
+  const headingPattern = headingDepth === 2
+    ? /^##(?!#)\s+\S/
+    : /^###(?!#)\s+\S/;
+  const blocks = [];
+  const preamble = [];
+  let currentBlock = null;
+  let inFence = false;
+
+  for (const line of lines) {
+    const trimmed = String(line || "").trim();
+    if (isFenceDelimiter(trimmed)) {
+      if (currentBlock) {
+        currentBlock.push(line);
+      } else {
+        preamble.push(line);
+      }
+      inFence = !inFence;
+      continue;
+    }
+
+    const isHeading = !inFence && headingPattern.test(trimmed);
+    if (isHeading) {
+      if (currentBlock) {
+        blocks.push(currentBlock.join("\n").trim());
+      }
+      currentBlock = preamble.splice(0, preamble.length);
+      currentBlock.push(line);
+      continue;
+    }
+
+    if (currentBlock) {
+      currentBlock.push(line);
+    } else {
+      preamble.push(line);
+    }
+  }
+
+  if (currentBlock) {
+    blocks.push(currentBlock.join("\n").trim());
+  } else {
+    const standalone = preamble.join("\n").trim();
+    if (standalone) {
+      blocks.push(standalone);
+    }
+  }
+
+  return blocks.filter(Boolean);
+}
+
+function getPromptSizeWarnings(normalizedPrompt) {
+  const warnings = [];
+  if (normalizedPrompt.length > PROMPT_STRONG_SPLIT_WARNING_CHARS) {
+    warnings.push(
+      "Prompt exceeds ~32KB. Strongly recommend splitting, ideally with `--chunked` or `--split-by markdown`."
+    );
+  } else if (normalizedPrompt.length > PROMPT_SOFT_SINGLE_SHOT_LIMIT_CHARS) {
+    warnings.push(
+      "Prompt exceeds Lovable's soft single-shot limit (~8KB). Consider `--chunked` or `--no-auto-split`."
+    );
+  }
+  return warnings;
 }
 
 export function shouldAutoSplitPrompt(prompt, {
@@ -246,50 +325,155 @@ export function splitPromptIntoChunks(prompt, {
   return chunks.filter(Boolean);
 }
 
-export function buildPromptSequence(prompt, {
-  autoSplit = true,
-  thresholdChars = DEFAULT_PROMPT_AUTO_SPLIT_THRESHOLD_CHARS,
-  thresholdNonEmptyLines = DEFAULT_PROMPT_AUTO_SPLIT_THRESHOLD_NON_EMPTY_LINES,
-  maxChunkChars = DEFAULT_PROMPT_AUTO_SPLIT_MAX_CHUNK_CHARS
+export function hasMarkdownSplitHeadings(prompt) {
+  const normalized = normalizePromptInput(prompt);
+  if (!normalized) {
+    return false;
+  }
+
+  return getMarkdownHeadingDepth(normalized.split("\n")) !== null;
+}
+
+export function splitPromptIntoMarkdownChunks(prompt, {
+  hardLimitChars = DEFAULT_PROMPT_MARKDOWN_HARD_CHUNK_CHARS,
+  fallbackMaxChunkChars = DEFAULT_PROMPT_AUTO_SPLIT_MAX_CHUNK_CHARS
 } = {}) {
   const normalized = normalizePromptInput(prompt);
   if (!normalized) {
-    return [];
-  }
-
-  const rawChunks = autoSplit
-    ? splitPromptIntoChunks(normalized, {
-      thresholdChars,
-      thresholdNonEmptyLines,
-      maxChunkChars
-    })
-    : [normalized];
-
-  if (rawChunks.length <= 1) {
-    return [{
-      index: 1,
-      total: 1,
-      rawPrompt: normalized,
-      prompt: normalized,
-      autoSplit: false
-    }];
-  }
-
-  const wrappedChunks = ensureWrappedChunksWithinLimit(rawChunks, maxChunkChars);
-
-  return wrappedChunks.map((chunk, index) => {
-    const partNumber = index + 1;
-    const isFinal = partNumber === wrappedChunks.length;
-    const wrapper = getPromptPartWrapper(partNumber, wrappedChunks.length, isFinal);
-
     return {
-      index: partNumber,
-      total: wrappedChunks.length,
-      rawPrompt: chunk,
-      prompt: `${wrapper}\n\n${chunk}`,
-      autoSplit: true
+      chunks: [],
+      headingDepth: null,
+      warnings: [],
+      usedFallback: false
     };
-  });
+  }
+
+  const headingDepth = getMarkdownHeadingDepth(normalized.split("\n"));
+  if (!headingDepth) {
+    return {
+      chunks: [normalized],
+      headingDepth: null,
+      warnings: [],
+      usedFallback: false
+    };
+  }
+
+  const chunks = splitMarkdownBlocks(normalized, headingDepth);
+  if (chunks.some((chunk) => chunk.length > hardLimitChars)) {
+    return {
+      chunks: splitPromptIntoChunks(normalized, {
+        thresholdChars: 0,
+        thresholdNonEmptyLines: 0,
+        maxChunkChars: fallbackMaxChunkChars
+      }),
+      headingDepth,
+      warnings: [
+        `A markdown section exceeded the hard chunk limit (~${hardLimitChars.toLocaleString()} chars). Falling back to character-based splitting.`
+      ],
+      usedFallback: true
+    };
+  }
+
+  return {
+    chunks,
+    headingDepth,
+    warnings: [],
+    usedFallback: false
+  };
+}
+
+export function estimatePromptTokenCount(prompt, {
+  charsPerToken = 4
+} = {}) {
+  const normalized = normalizePromptInput(prompt);
+  if (!normalized) {
+    return 0;
+  }
+
+  return Math.max(1, Math.ceil(normalized.length / charsPerToken));
+}
+
+export function planPromptSequence(prompt, {
+  autoSplit = true,
+  chunked = false,
+  splitBy,
+  thresholdChars = DEFAULT_PROMPT_AUTO_SPLIT_THRESHOLD_CHARS,
+  thresholdNonEmptyLines = DEFAULT_PROMPT_AUTO_SPLIT_THRESHOLD_NON_EMPTY_LINES,
+  maxChunkChars = DEFAULT_PROMPT_AUTO_SPLIT_MAX_CHUNK_CHARS,
+  markdownHardLimitChars = DEFAULT_PROMPT_MARKDOWN_HARD_CHUNK_CHARS
+} = {}) {
+  const normalized = normalizePromptInput(prompt);
+  if (!normalized) {
+    return {
+      normalizedPrompt: "",
+      sequence: [],
+      warnings: [],
+      estimatedTokens: 0,
+      strategy: "none"
+    };
+  }
+
+  const normalizedStrategy = normalizeSplitStrategy(splitBy);
+  const useMarkdownSplit = normalizedStrategy === "markdown" ||
+    (!normalizedStrategy && chunked && hasMarkdownSplitHeadings(normalized));
+  const warnings = getPromptSizeWarnings(normalized);
+  let rawChunks = [normalized];
+  let strategy = "none";
+
+  if (useMarkdownSplit && (autoSplit || chunked)) {
+    const markdownPlan = splitPromptIntoMarkdownChunks(normalized, {
+      hardLimitChars: markdownHardLimitChars,
+      fallbackMaxChunkChars: maxChunkChars
+    });
+    rawChunks = markdownPlan.chunks;
+    warnings.push(...markdownPlan.warnings);
+    strategy = markdownPlan.usedFallback ? "chars" : "markdown";
+  } else if (autoSplit || chunked) {
+    rawChunks = splitPromptIntoChunks(normalized, {
+      thresholdChars: chunked ? 0 : thresholdChars,
+      thresholdNonEmptyLines: chunked ? 0 : thresholdNonEmptyLines,
+      maxChunkChars
+    });
+    strategy = rawChunks.length > 1 ? "chars" : "none";
+  }
+
+  const sequence = rawChunks.map((chunk, index) => ({
+    index: index + 1,
+    total: rawChunks.length,
+    rawPrompt: chunk,
+    prompt: chunk,
+    autoSplit: rawChunks.length > 1,
+    splitStrategy: strategy
+  }));
+
+  return {
+    normalizedPrompt: normalized,
+    sequence,
+    warnings,
+    estimatedTokens: estimatePromptTokenCount(normalized),
+    strategy,
+    autoSplitTriggered: rawChunks.length > 1
+  };
+}
+
+export function buildPromptSequence(prompt, {
+  autoSplit = true,
+  chunked = false,
+  splitBy,
+  thresholdChars = DEFAULT_PROMPT_AUTO_SPLIT_THRESHOLD_CHARS,
+  thresholdNonEmptyLines = DEFAULT_PROMPT_AUTO_SPLIT_THRESHOLD_NON_EMPTY_LINES,
+  maxChunkChars = DEFAULT_PROMPT_AUTO_SPLIT_MAX_CHUNK_CHARS,
+  markdownHardLimitChars = DEFAULT_PROMPT_MARKDOWN_HARD_CHUNK_CHARS
+} = {}) {
+  return planPromptSequence(prompt, {
+    autoSplit,
+    chunked,
+    splitBy,
+    thresholdChars,
+    thresholdNonEmptyLines,
+    maxChunkChars,
+    markdownHardLimitChars
+  }).sequence;
 }
 
 export function parseAssertionLines(value) {

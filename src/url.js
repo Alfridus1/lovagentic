@@ -33,3 +33,60 @@ export function normalizeTargetUrl(target, baseUrl = DEFAULT_BASE_URL) {
   }
   return url.toString();
 }
+
+export function normalizePreviewRoute(route = "/") {
+  const trimmed = String(route || "").trim();
+  if (!trimmed || trimmed === "/") {
+    return "/";
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    const url = new URL(trimmed);
+    return `${url.pathname || "/"}${url.search}${url.hash}` || "/";
+  }
+
+  if (trimmed.startsWith("?") || trimmed.startsWith("#")) {
+    return `/${trimmed}`;
+  }
+
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+export function buildPreviewRouteUrl(baseUrl, route = "/") {
+  const target = new URL(baseUrl);
+  const normalizedRoute = normalizePreviewRoute(route);
+  if (normalizedRoute === "/") {
+    target.pathname = "/";
+    target.search = "";
+    target.hash = "";
+    return target.toString();
+  }
+
+  return new URL(normalizedRoute, target).toString();
+}
+
+export function slugifyPreviewRoute(route = "/") {
+  const normalizedRoute = normalizePreviewRoute(route);
+  if (normalizedRoute === "/") {
+    return "root";
+  }
+
+  const normalizedUrl = new URL(`https://example.invalid${normalizedRoute}`);
+  const slugSource = `${normalizedUrl.pathname}${normalizedUrl.search}${normalizedUrl.hash}`
+    .replace(/^\/+/, "")
+    .replace(/[^a-z0-9]+/gi, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+
+  return slugSource || "root";
+}
+
+export function getVerificationScreenshotFilename(variant, route = "/", {
+  explicitRoute = false
+} = {}) {
+  if (!explicitRoute) {
+    return `${variant}.png`;
+  }
+
+  return `${variant}__${slugifyPreviewRoute(route)}.png`;
+}
