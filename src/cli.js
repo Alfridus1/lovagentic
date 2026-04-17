@@ -2,9 +2,23 @@
 
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { Command } from "commander";
+
+// Read package.json once at startup so `--version` always reflects the real
+// installed release instead of a hardcoded string that drifts every bump.
+const __dirname_cli = path.dirname(fileURLToPath(import.meta.url));
+let PKG_VERSION = "0.0.0-unknown";
+try {
+  PKG_VERSION = JSON.parse(
+    readFileSync(path.resolve(__dirname_cli, "..", "package.json"), "utf8")
+  ).version || PKG_VERSION;
+} catch {
+  // keep fallback
+}
 
 import {
   DEFAULT_BASE_URL,
@@ -90,7 +104,7 @@ const program = new Command();
 program
   .name("lovagentic")
   .description("Prototype CLI for steering Lovable from the local machine.")
-  .version("0.1.4");
+  .version(PKG_VERSION);
 
 program
   .command("doctor")

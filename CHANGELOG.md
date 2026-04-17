@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-04-18
+
+### Fixed
+
+- `lovagentic --version` no longer reports a stale hardcoded version string. It now reads the installed `package.json` at startup, so the value always matches whatever npm actually installed. Previously every release drifted until someone remembered to touch `.version("…")` in `src/cli.js`, and a user who installed `0.1.6` would still see `0.1.4`.
+
+### Added
+
+- `test/version.test.js` guards both sides of the fix: it asserts `--version` exec output equals `package.json` version, and that `src/cli.js` contains no `.version("x.y.z")` literal so the hardcoded pattern cannot silently come back.
+
 ## [0.1.6] - 2026-04-18
 
 ### Added

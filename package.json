@@ -1,6 +1,6 @@
 {
   "name": "lovagentic",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Agentic CLI for Lovable.dev — agents in, apps out. Send prompts, verify builds, fix errors, and publish from the terminal.",
   "type": "module",
   "license": "MIT",
@@ -43,7 +43,7 @@
     "doctor": "node ./src/cli.js doctor",
     "generate:commands": "node ./scripts/generate-command-reference.mjs",
     "check:commands": "node ./scripts/generate-command-reference.mjs --check",
-    "test": "node --test ./test/browser.attachments.test.js ./test/browser.idle.test.js ./test/browser.multiline.test.js ./test/dashboard.test.js ./test/orchestration.test.js ./test/profile.test.js ./test/prompt-match.test.js ./test/publish.test.js ./test/url.test.js",
+    "test": "node --test ./test/browser.attachments.test.js ./test/browser.idle.test.js ./test/browser.multiline.test.js ./test/dashboard.test.js ./test/orchestration.test.js ./test/profile.test.js ./test/prompt-match.test.js ./test/publish.test.js ./test/url.test.js ./test/version.test.js",
     "check:syntax": "node --check ./src/browser.js && node --check ./src/cli.js && node --check ./src/config.js && node --check ./src/orchestration.js && node --check ./src/profile.js && node --check ./src/publish.js && node --check ./src/url.js && node --check ./scripts/publish-to-npm.mjs",
     "check": "npm run check:syntax && npm test && npm run check:commands",
     "ci": "npm run check",
