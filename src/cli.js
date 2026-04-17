@@ -2091,16 +2091,31 @@ addProjectSessionOptions(
         throw new Error("Target project was not found in the Lovable dashboard metadata feed.");
       }
 
-      const gitState = await getProjectGitState(page, {
-        projectUrl: normalizedUrl,
-        provider: options.provider,
-        timeoutMs: options.timeoutMs
-      });
-      const previewInfo = await getProjectPreviewInfo(page, {
-        timeoutMs: options.timeoutMs
-      });
-      const previewRootUrl = buildPreviewRouteUrl(previewInfo.src, "/");
-      const previewHead = await probePreviewUrl(previewRootUrl);
+      let gitState = null;
+      let gitError = null;
+      try {
+        gitState = await getProjectGitState(page, {
+          projectUrl: normalizedUrl,
+          provider: options.provider,
+          timeoutMs: options.timeoutMs
+        });
+      } catch (err) {
+        gitError = err?.message || String(err);
+      }
+
+      let previewInfo = null;
+      let previewRootUrl = null;
+      let previewHead = null;
+      let previewError = null;
+      try {
+        previewInfo = await getProjectPreviewInfo(page, {
+          timeoutMs: Math.min(options.timeoutMs, 15_000)
+        });
+        previewRootUrl = buildPreviewRouteUrl(previewInfo.src, "/");
+        previewHead = await probePreviewUrl(previewRootUrl);
+      } catch (err) {
+        previewError = err?.message || String(err);
+      }
 
       const state = {
         projectUrl: normalizedUrl,
@@ -2114,20 +2129,40 @@ addProjectSessionOptions(
         lastViewedAt: project.lastViewedAt,
         published: project.published,
         liveUrl: project.liveUrl || null,
-        git: {
-          connected: gitState.connected,
-          repository: gitState.repository,
-          branch: gitState.branch,
-          provider: gitState.provider
-        },
-        preview: {
-          sourceUrl: redactPreviewUrl(previewInfo.src),
-          rootUrl: redactPreviewUrl(previewRootUrl),
-          headStatus: previewHead.status,
-          headOk: previewHead.ok,
-          finalUrl: previewHead.finalUrl ? redactPreviewUrl(previewHead.finalUrl) : null,
-          routeCountDetected: null
-        }
+        git: gitState
+          ? {
+              connected: gitState.connected,
+              repository: gitState.repository,
+              branch: gitState.branch,
+              provider: gitState.provider,
+              error: null
+            }
+          : {
+              connected: false,
+              repository: null,
+              branch: null,
+              provider: options.provider,
+              error: gitError
+            },
+        preview: previewInfo
+          ? {
+              sourceUrl: redactPreviewUrl(previewInfo.src),
+              rootUrl: redactPreviewUrl(previewRootUrl),
+              headStatus: previewHead.status,
+              headOk: previewHead.ok,
+              finalUrl: previewHead.finalUrl ? redactPreviewUrl(previewHead.finalUrl) : null,
+              routeCountDetected: null,
+              error: null
+            }
+          : {
+              sourceUrl: null,
+              rootUrl: null,
+              headStatus: null,
+              headOk: false,
+              finalUrl: null,
+              routeCountDetected: null,
+              error: previewError
+            }
       };
 
       if (options.json) {
@@ -3321,11 +3356,19 @@ function printProjectStatusState(state) {
   console.log(`Git connected: ${state.git.connected ? "yes" : "no"}`);
   console.log(`Git repository: ${state.git.repository || "(none)"}`);
   console.log(`Git branch: ${state.git.branch || "(unknown)"}`);
-  console.log(`Preview source: ${state.preview.sourceUrl}`);
-  console.log(`Preview root URL: ${state.preview.rootUrl}`);
-  console.log(`Preview HEAD status: ${state.preview.headStatus ?? "unknown"}`);
-  console.log(`Preview reachable: ${state.preview.headOk ? "yes" : "no"}`);
-  console.log(`Detected routes: ${state.preview.routeCountDetected ?? "(not sampled)"}`);
+  if (state.git.error) {
+    console.log(`Git error: ${state.git.error}`);
+  }
+  if (state.preview.error) {
+    console.log(`Preview source: (unavailable)`);
+    console.log(`Preview error: ${state.preview.error}`);
+  } else {
+    console.log(`Preview source: ${state.preview.sourceUrl}`);
+    console.log(`Preview root URL: ${state.preview.rootUrl}`);
+    console.log(`Preview HEAD status: ${state.preview.headStatus ?? "unknown"}`);
+    console.log(`Preview reachable: ${state.preview.headOk ? "yes" : "no"}`);
+    console.log(`Detected routes: ${state.preview.routeCountDetected ?? "(not sampled)"}`);
+  }
 }
 
 function printCodeState(state) {
