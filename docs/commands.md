@@ -93,6 +93,9 @@ Options:
   --profile-dir <path>          Override the CLI browser profile path
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --json                        Print machine-readable JSON (default: false)
+  --self-heal                   Automatically repair fixable problems (install
+                                Chromium, seed CLI profile from desktop session)
+                                (default: false)
   -h, --help                    display help for command
 ```
 

@@ -86,55 +86,53 @@ program
   .option("--profile-dir <path>", "Override the CLI browser profile path")
   .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
   .option("--json", "Print machine-readable JSON", false)
+  .option("--self-heal", "Automatically repair fixable problems (install Chromium, seed CLI profile from desktop session)", false)
   .action(async (options) => {
     const profileDir = getProfileDir(options.profileDir);
     const desktopProfileDir = getDesktopProfileDir(options.desktopProfileDir);
-    const playwrightDefaultDir = getPlaywrightDefaultProfileDir(profileDir);
 
-    // --- Filesystem / session ---
-    const desktopAppInstalled = await pathExists(DEFAULT_DESKTOP_APP_PATH);
-    const desktopProfileExists = await pathExists(desktopProfileDir);
-    const cliProfileExists = await pathExists(profileDir);
-    const cliCookieFileExists = await pathExists(`${playwrightDefaultDir}/Cookies`);
-    const desktopCookieFileExists = await pathExists(`${desktopProfileDir}/Cookies`);
+    // First pass — describe current state.
+    let result = await runDoctorChecks({ profileDir, desktopProfileDir });
+    let healedActions = [];
 
-    // --- Node version ---
-    const nodeMajor = Number(process.versions.node.split(".")[0] || 0);
-    const nodeOk = nodeMajor >= 20;
+    if (options.selfHeal) {
+      healedActions = await selfHealDoctor({
+        profileDir,
+        desktopProfileDir,
+        checks: result.checks,
+        json: Boolean(options.json)
+      });
+      if (healedActions.length > 0) {
+        // Re-run to reflect the new state.
+        result = await runDoctorChecks({ profileDir, desktopProfileDir });
+      }
+    }
 
-    // --- Playwright package + chromium binary ---
-    const pwStatus = await detectPlaywright();
-
-    // --- MCP backend readiness ---
-    const mcpConfigured = Boolean(process.env.LOVABLE_MCP_URL);
-
-    const checks = [
-      { key: "node", label: `Node.js ${process.version}`, ok: nodeOk, hint: nodeOk ? null : "lovagentic requires Node 20+. Upgrade Node before continuing." },
-      { key: "desktopApp", label: `Lovable.app (${DEFAULT_DESKTOP_APP_PATH})`, ok: desktopAppInstalled, hint: desktopAppInstalled ? null : "Lovable desktop app not installed. Download from https://lovable.dev/download — required to seed a session." },
-      { key: "desktopProfile", label: `Desktop profile (${desktopProfileDir})`, ok: desktopProfileExists, hint: desktopProfileExists ? null : "Launch Lovable.app at least once and sign in before running lovagentic." },
-      { key: "desktopCookies", label: "Desktop cookies", ok: desktopCookieFileExists, hint: desktopCookieFileExists ? null : "No Lovable session found in the desktop profile. Sign in to Lovable.app first." },
-      { key: "cliProfile", label: `CLI profile (${profileDir})`, ok: cliProfileExists, hint: cliProfileExists ? null : "Run `lovagentic login` or `lovagentic import-desktop-session` to create the CLI profile." },
-      { key: "cliCookies", label: "CLI cookies", ok: cliCookieFileExists, hint: cliCookieFileExists ? null : "CLI profile has no session. Run `lovagentic import-desktop-session` to copy your desktop session." },
-      { key: "playwright", label: `Playwright (${pwStatus.version ?? "not installed"})`, ok: pwStatus.installed, hint: pwStatus.installed ? null : "Run `npm install` in the lovagentic repo, or install the npm package." },
-      { key: "chromium", label: "Playwright Chromium binary", ok: pwStatus.chromium, hint: pwStatus.chromium ? null : "Run `npx playwright install chromium` to download the browser." },
-      { key: "mcp", label: `MCP backend (${mcpConfigured ? "configured" : "not configured"})`, ok: true, hint: mcpConfigured ? null : "LOVABLE_MCP_URL not set. Using browser backend. MCP support ships in v0.2." }
-    ];
-
+    const { checks, playwrightDefaultDir } = result;
     const failed = checks.filter((c) => !c.ok);
 
     if (options.json) {
       console.log(JSON.stringify({
         ok: failed.length === 0,
         failed: failed.map((c) => c.key),
+        healed: healedActions,
         checks,
         paths: { profileDir, desktopProfileDir, playwrightDefaultDir },
         node: process.version,
-        mcpConfigured
+        mcpConfigured: Boolean(process.env.LOVABLE_MCP_URL)
       }, null, 2));
     } else {
       for (const c of checks) {
         const mark = c.ok ? "\u2713" : "\u2717";
         console.log(`${mark} ${c.label}`);
+      }
+      if (healedActions.length > 0) {
+        console.log("");
+        console.log("Self-heal actions:");
+        for (const a of healedActions) {
+          const mark = a.ok ? "\u2713" : "\u2717";
+          console.log(`  ${mark} ${a.label}${a.detail ? ` \u2014 ${a.detail}` : ""}`);
+        }
       }
       const hints = checks.filter((c) => c.hint);
       if (hints.length > 0) {
@@ -150,6 +148,106 @@ program
       process.exitCode = 1;
     }
   });
+
+async function runDoctorChecks({ profileDir, desktopProfileDir }) {
+  const playwrightDefaultDir = getPlaywrightDefaultProfileDir(profileDir);
+
+  const desktopAppInstalled = await pathExists(DEFAULT_DESKTOP_APP_PATH);
+  const desktopProfileExists = await pathExists(desktopProfileDir);
+  const cliProfileExists = await pathExists(profileDir);
+  const cliCookieFileExists = await pathExists(`${playwrightDefaultDir}/Cookies`);
+  const desktopCookieFileExists = await pathExists(`${desktopProfileDir}/Cookies`);
+
+  const nodeMajor = Number(process.versions.node.split(".")[0] || 0);
+  const nodeOk = nodeMajor >= 20;
+
+  const pwStatus = await detectPlaywright();
+  const mcpConfigured = Boolean(process.env.LOVABLE_MCP_URL);
+
+  const checks = [
+    { key: "node", label: `Node.js ${process.version}`, ok: nodeOk, healable: false, hint: nodeOk ? null : "lovagentic requires Node 20+. Upgrade Node before continuing." },
+    { key: "desktopApp", label: `Lovable.app (${DEFAULT_DESKTOP_APP_PATH})`, ok: desktopAppInstalled, healable: false, hint: desktopAppInstalled ? null : "Lovable desktop app not installed. Download from https://lovable.dev/download — required to seed a session." },
+    { key: "desktopProfile", label: `Desktop profile (${desktopProfileDir})`, ok: desktopProfileExists, healable: false, hint: desktopProfileExists ? null : "Launch Lovable.app at least once and sign in before running lovagentic." },
+    { key: "desktopCookies", label: "Desktop cookies", ok: desktopCookieFileExists, healable: false, hint: desktopCookieFileExists ? null : "No Lovable session found in the desktop profile. Sign in to Lovable.app first." },
+    { key: "cliProfile", label: `CLI profile (${profileDir})`, ok: cliProfileExists, healable: true, hint: cliProfileExists ? null : "Run `lovagentic login`, `lovagentic import-desktop-session`, or `lovagentic doctor --self-heal`." },
+    { key: "cliCookies", label: "CLI cookies", ok: cliCookieFileExists, healable: true, hint: cliCookieFileExists ? null : "CLI profile has no session. Run `lovagentic import-desktop-session` or `lovagentic doctor --self-heal`." },
+    { key: "playwright", label: `Playwright (${pwStatus.version ?? "not installed"})`, ok: pwStatus.installed, healable: false, hint: pwStatus.installed ? null : "Run `npm install` in the lovagentic repo, or install the npm package." },
+    { key: "chromium", label: "Playwright Chromium binary", ok: pwStatus.chromium, healable: true, hint: pwStatus.chromium ? null : "Run `npx playwright install chromium`, or `lovagentic doctor --self-heal`." },
+    { key: "mcp", label: `MCP backend (${mcpConfigured ? "configured" : "not configured"})`, ok: true, healable: false, hint: mcpConfigured ? null : "LOVABLE_MCP_URL not set. Using browser backend. MCP support ships in v0.2." }
+  ];
+
+  return { checks, playwrightDefaultDir };
+}
+
+async function selfHealDoctor({ profileDir, desktopProfileDir, checks, json }) {
+  const actions = [];
+  const log = (msg) => { if (!json) console.log(msg); };
+
+  // Heal Chromium binary.
+  const chromiumCheck = checks.find((c) => c.key === "chromium");
+  const playwrightInstalled = checks.find((c) => c.key === "playwright")?.ok;
+  if (chromiumCheck && !chromiumCheck.ok && playwrightInstalled) {
+    log("\u2022 Installing Playwright Chromium...");
+    const install = await runChildProcess("npx", ["playwright", "install", "chromium"]);
+    actions.push({
+      key: "install_chromium",
+      label: "Install Playwright Chromium",
+      ok: install.ok,
+      detail: install.ok ? null : install.error
+    });
+  }
+
+  // Heal CLI profile / cookies by seeding from desktop session.
+  const cliProfileCheck = checks.find((c) => c.key === "cliProfile");
+  const cliCookiesCheck = checks.find((c) => c.key === "cliCookies");
+  const desktopCookies = checks.find((c) => c.key === "desktopCookies");
+
+  if ((cliProfileCheck && !cliProfileCheck.ok) || (cliCookiesCheck && !cliCookiesCheck.ok)) {
+    if (desktopCookies?.ok) {
+      log("\u2022 Seeding CLI profile from Lovable desktop session...");
+      try {
+        const result = await seedDesktopProfileIntoPlaywrightDefault({
+          fromDir: desktopProfileDir,
+          toDir: profileDir,
+          force: false
+        });
+        actions.push({
+          key: "seed_profile",
+          label: "Import desktop session into CLI profile",
+          ok: true,
+          detail: `copied ${result.copied.length} entries to ${result.targetDefaultDir}`
+        });
+      } catch (err) {
+        actions.push({
+          key: "seed_profile",
+          label: "Import desktop session into CLI profile",
+          ok: false,
+          detail: err?.message || String(err)
+        });
+      }
+    } else {
+      actions.push({
+        key: "seed_profile",
+        label: "Import desktop session into CLI profile",
+        ok: false,
+        detail: "Desktop session not available. Sign in to Lovable.app and retry."
+      });
+    }
+  }
+
+  return actions;
+}
+
+async function runChildProcess(command, args) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { stdio: "inherit" });
+    child.on("error", (err) => resolve({ ok: false, error: err?.message || String(err) }));
+    child.on("close", (code) => {
+      if (code === 0) resolve({ ok: true });
+      else resolve({ ok: false, error: `${command} exited with code ${code}` });
+    });
+  });
+}
 
 async function detectPlaywright() {
   let version = null;
