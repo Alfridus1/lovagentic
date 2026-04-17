@@ -1,0 +1,55 @@
+# .github/workflows/lovable-lighthouse.yml
+#
+# Gates merges on Lighthouse scores for your Lovable preview.
+# Fails the check if Performance < 80 or Accessibility < 90 on either
+# desktop or mobile.
+
+name: Lovable Lighthouse
+
+on:
+  pull_request:
+    paths:
+      - "prompts/**"
+      - ".github/workflows/lovable-lighthouse.yml"
+  workflow_dispatch:
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install lovagentic
+        run: npm install -g lovagentic
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Restore Lovable session
+        env:
+          LOVABLE_SESSION_ARCHIVE: ${{ secrets.LOVABLE_SESSION_ARCHIVE }}
+        run: |
+          mkdir -p ~/.lovagentic/profile
+          printf '%s' "$LOVABLE_SESSION_ARCHIVE" | base64 -d | tar xz -C ~/.lovagentic/profile
+
+      - name: Run Lighthouse
+        run: |
+          lovagentic speed \
+            --id "${{ vars.LOVABLE_PROJECT_ID }}" \
+            --device both \
+            --min-performance 80 \
+            --min-accessibility 90 \
+            --min-best-practices 85 \
+            --output-dir ./lighthouse-reports
+
+      - name: Upload Lighthouse reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-${{ github.event.pull_request.number }}
+          path: ./lighthouse-reports/**

@@ -1,0 +1,13 @@
+{
+  "_comment": "Claude Desktop MCP config for lovagentic. Available once lovagentic v0.2 ships the MCP adapter. Copy the `lovagentic` block into your existing `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%/Claude/claude_desktop_config.json` (Windows). Claude will then be able to list your Lovable projects, send prompts, publish, and verify previews — all without leaving the chat.",
+  "mcpServers": {
+    "lovagentic": {
+      "command": "npx",
+      "args": ["-y", "lovagentic@latest", "mcp"],
+      "env": {
+        "LOVAGENTIC_PROFILE_DIR": "/Users/YOUR_USER/.lovagentic/profile",
+        "LOVAGENTIC_DEFAULT_MODE": "chat"
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "_comment": "Cursor MCP config for lovagentic. Save at ~/.cursor/mcp.json (or the workspace-level .cursor/mcp.json). Available once lovagentic v0.2 ships the MCP adapter. Cursor can then invoke lovagentic tools directly from Composer / Cursor Agent.",
+  "mcpServers": {
+    "lovagentic": {
+      "command": "npx",
+      "args": ["-y", "lovagentic@latest", "mcp"],
+      "env": {
+        "LOVAGENTIC_PROFILE_DIR": "/Users/YOUR_USER/.lovagentic/profile"
+      }
+    }
+  }
+}

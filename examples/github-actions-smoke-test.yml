@@ -1,0 +1,63 @@
+# .github/workflows/lovable-smoke.yml
+#
+# Runs on every PR that touches your Lovable project prompts.
+# Verifies the Lovable preview is reachable on desktop + mobile and uploads
+# screenshots back to the PR for reviewers.
+
+name: Lovable smoke test
+
+on:
+  pull_request:
+    paths:
+      - "prompts/**"
+      - "package.json"
+      - ".github/workflows/lovable-smoke.yml"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install lovagentic
+        run: npm install -g lovagentic
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Configure lovagentic session
+        env:
+          LOVABLE_SESSION_ARCHIVE: ${{ secrets.LOVABLE_SESSION_ARCHIVE }}
+        run: |
+          mkdir -p ~/.lovagentic/profile
+          printf '%s' "$LOVABLE_SESSION_ARCHIVE" | base64 -d | tar xz -C ~/.lovagentic/profile
+          lovagentic doctor
+
+      - name: Verify preview
+        run: |
+          lovagentic verify \
+            --id "${{ vars.LOVABLE_PROJECT_ID }}" \
+            --output-dir ./snapshots \
+            --fail-on-console
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lovable-preview-${{ github.event.pull_request.number }}
+          path: ./snapshots/**
+
+      - name: Comment on PR
+        if: always()
+        uses: thollander/actions-comment-pull-request@v3
+        with:
+          message: |
+            ### Lovable preview
+            Screenshots attached to this run's artifacts.
+            Project: [`${{ vars.LOVABLE_PROJECT_ID }}`](https://lovable.dev/projects/${{ vars.LOVABLE_PROJECT_ID }})
+          comment-tag: lovable-preview
