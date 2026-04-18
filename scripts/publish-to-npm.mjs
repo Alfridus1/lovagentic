@@ -160,9 +160,16 @@ async function main() {
 
   const { name, version } = await readPackageMetadata();
   const currentGitHead = await getCurrentGitHead();
+  // npm provenance requires OIDC-capable CI (e.g. GitHub Actions). When running
+  // outside CI, fall back to a plain `npm publish --access public`.
+  const isCi = Boolean(
+    process.env.GITHUB_ACTIONS || process.env.CI_WITH_PROVENANCE || process.env.NPM_PROVENANCE
+  );
   const publishArgs = dryRun
     ? ["pack", "--dry-run"]
-    : ["publish", "--provenance", "--access", "public"];
+    : isCi
+      ? ["publish", "--provenance", "--access", "public"]
+      : ["publish", "--access", "public"];
 
   const publishResult = await runCommand("npm", publishArgs, {
     tolerateFailure: true
