@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-04-18
+
+### Added
+
+- `doctor` now probes network reachability to `https://lovable.dev` and `https://registry.npmjs.org` with a 3s timeout each, including response latency in the human-readable output (`lovable.dev reachable (219ms)`). Failures are surfaced with a hint covering offline/proxy issues. The JSON output includes the new `lovableReachable` and `npmReachable` check keys.
+
 ## [0.1.8] - 2026-04-18
 
 ### Fixed

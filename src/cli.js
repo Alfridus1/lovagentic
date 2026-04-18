@@ -190,6 +190,9 @@ async function runDoctorChecks({ profileDir, desktopProfileDir }) {
   const pwStatus = await detectPlaywright();
   const mcpConfigured = Boolean(process.env.LOVABLE_MCP_URL);
 
+  // Network reachability checks (fast, ~3s timeout each, in parallel).
+  const network = await runNetworkChecks();
+
   const checks = [
     { key: "node", label: `Node.js ${process.version}`, ok: nodeOk, healable: false, hint: nodeOk ? null : "lovagentic requires Node 20+. Upgrade Node before continuing." },
     { key: "desktopApp", label: `Lovable.app (${DEFAULT_DESKTOP_APP_PATH})`, ok: desktopAppInstalled, healable: false, hint: desktopAppInstalled ? null : "Lovable desktop app not installed. Download from https://lovable.dev/download — required to seed a session." },
@@ -199,10 +202,35 @@ async function runDoctorChecks({ profileDir, desktopProfileDir }) {
     { key: "cliCookies", label: "CLI cookies", ok: cliCookieFileExists, healable: true, hint: cliCookieFileExists ? null : "CLI profile has no session. Run `lovagentic import-desktop-session` or `lovagentic doctor --self-heal`." },
     { key: "playwright", label: `Playwright (${pwStatus.version ?? "not installed"})`, ok: pwStatus.installed, healable: false, hint: pwStatus.installed ? null : "Run `npm install` in the lovagentic repo, or install the npm package." },
     { key: "chromium", label: "Playwright Chromium binary", ok: pwStatus.chromium, healable: true, hint: pwStatus.chromium ? null : "Run `npx playwright install chromium`, or `lovagentic doctor --self-heal`." },
+    { key: "lovableReachable", label: `lovable.dev reachable${network.lovable.ms != null ? ` (${network.lovable.ms}ms)` : ""}`, ok: network.lovable.ok, healable: false, hint: network.lovable.ok ? null : `Cannot reach https://lovable.dev (${network.lovable.error ?? "unknown error"}). Check internet connection or corporate proxy.` },
+    { key: "npmReachable", label: `npm registry reachable${network.npm.ms != null ? ` (${network.npm.ms}ms)` : ""}`, ok: network.npm.ok, healable: false, hint: network.npm.ok ? null : `Cannot reach registry.npmjs.org (${network.npm.error ?? "unknown error"}). Required for self-update checks.` },
     { key: "mcp", label: `MCP backend (${mcpConfigured ? "configured" : "not configured"})`, ok: true, healable: false, hint: mcpConfigured ? null : "LOVABLE_MCP_URL not set. Using browser backend. MCP support ships in v0.2." }
   ];
 
   return { checks, playwrightDefaultDir };
+}
+
+async function runNetworkChecks() {
+  const probe = async (url) => {
+    const started = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    try {
+      const res = await fetch(url, { method: "HEAD", signal: controller.signal, redirect: "manual" });
+      clearTimeout(timer);
+      // 2xx, 3xx, and even 4xx count as reachable (server responded).
+      // 5xx and network errors are treated as down.
+      return { ok: res.status < 500, ms: Date.now() - started, status: res.status };
+    } catch (err) {
+      clearTimeout(timer);
+      return { ok: false, ms: null, error: err?.name === "AbortError" ? "timeout" : (err?.message?.slice(0, 80) ?? "network error") };
+    }
+  };
+  const [lovable, npm] = await Promise.all([
+    probe("https://lovable.dev"),
+    probe("https://registry.npmjs.org")
+  ]);
+  return { lovable, npm };
 }
 
 async function selfHealDoctor({ profileDir, desktopProfileDir, checks, json }) {
