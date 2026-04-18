@@ -196,7 +196,8 @@ Important constraints:
 
 | Command | Purpose |
 | --- | --- |
-| `doctor` | Inspect local Lovable desktop and CLI profile state |
+| `init` | Scaffold a new project directory (`.lovagentic.json`, `.env.example`, `prompts/`, ...) |
+| `doctor` | Inspect local Lovable desktop and CLI profile state, plus network reachability |
 | `import-desktop-session` | Seed Playwright profile from the macOS desktop app |
 | `login` | Create a CLI-managed browser session |
 | `list` | List dashboard projects and visible workspaces |
@@ -236,7 +237,37 @@ Important constraints:
 
 Run `npm run help` or `npm run start -- --help` for the full command list.
 
-## v0.1.4 — Verified actions
+## Highlights
+
+### Scaffold a new project (v0.1.10)
+
+Use `init` to generate a working project layout in seconds. Idempotent, so safe to re-run:
+
+```bash
+mkdir my-lovable-project && cd my-lovable-project
+lovagentic init --project-url https://lovable.dev/projects/YOUR-UUID
+cp .env.example .env
+lovagentic doctor
+```
+
+`init` creates `.lovagentic.json`, `.env.example`, `.gitignore` (preserves existing entries), `prompts/example.md`, and a short `README.md`. Re-running skips existing files unless you pass `--force`, and it supports `--json` for CI pipelines.
+
+### Machine-readable output (v0.1.10)
+
+Both `publish` and `verify` now support `--json`, alongside the existing JSON-capable commands (`status`, `actions`, `questions`, `findings`, `knowledge`, `toolbar`, `workspace`, `git`, `code`, `speed`, `errors`, `attachments`, `fidelity-loop`, `wait-for-idle`, `domain`, `project-settings`).
+
+```bash
+lovagentic publish "https://lovable.dev/projects/your-project" --json
+# => {"ok":true,"deploymentId":"...","liveUrl":"https://...lovable.app",
+#     "liveCheck":{"status":200},"verificationSummaryPath":null,...}
+
+lovagentic verify "https://lovable.dev/projects/your-project" --json
+# => {"ok":true,"summaryPath":"/.../summary.json","summary":{...},"outputDir":"..."}
+```
+
+### Network-aware doctor (v0.1.9)
+
+`doctor` now probes lovable.dev and registry.npmjs.org, returning reachability status and latency inline. Useful on locked-down CI runners.
 
 ### Verify specific preview routes
 
