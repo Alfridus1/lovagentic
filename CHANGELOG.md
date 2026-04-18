@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-04-18
+
+### Fixed
+
+- `publish` no longer stalls at `"visibility" without a Continue button` for already-published projects. The wizard concatenates words without whitespace (e.g. `PublishedLive URLWho can see the website`), so the old `\bPublished\b` word-boundary regex couldn't match and the surface was misclassified as the pre-publish visibility step. The classifier now uses non-bounded matches for both `Published` and `Live URL`.
+- `publish` no longer fails with `Lovable publish flow never exposed a live URL` when the wizard hides the hostname behind a copy button. All three early-return paths fall back to the dashboard project record (fetched in a sibling tab so the project page isn't navigated away) and use the dashboard-reported `liveUrl` when the wizard DOM can't expose it.
+
+### Added
+
+- `classifyPublishSurface` is now exported from `src/browser.js` for unit testing.
+- `test/publish-classify.test.js` adds 10 regression cases covering the concatenated-`Published`-`Live URL` case, the fresh visibility step, the publishing/review/website_info/website_url/unknown steps, and the `Publishing > Published` precedence during an update.
+
 ## [0.1.7] - 2026-04-18
 
 ### Fixed

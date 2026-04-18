@@ -2726,18 +2726,24 @@ async function readResponseBody(response) {
   }
 }
 
-function classifyPublishSurface(text) {
+export function classifyPublishSurface(text) {
   const normalized = String(text || "").trim();
 
   if (!normalized) {
     return "closed";
   }
 
-  if (/\bPublishing\b/i.test(normalized)) {
+  if (/Publishing\b/i.test(normalized)) {
     return "publishing";
   }
 
-  if (/\bPublished\b/i.test(normalized) || /\bLive URL\b/i.test(normalized)) {
+  // Lovable sometimes concatenates words without whitespace (e.g.
+  // "PublishedLive URL" on the already-live wizard surface), so word-
+  // boundary regexes like \bPublished\b fail because `d` + `L` is a
+  // letter-to-letter transition. Use non-bounded matches for both
+  // "Published" and "Live URL" so already-published projects resolve to
+  // the published state and the loop breaks out with canUpdate.
+  if (/Published/i.test(normalized) || /Live URL/i.test(normalized)) {
     return "published";
   }
 
@@ -4173,15 +4179,41 @@ export async function publishProject(page, {
   });
   const stepHistory = [summarizePublishState(state)];
 
+  // Helper: fall back to dashboard project record when the wizard surface
+  // doesn't expose the live URL (it sometimes lives only inside a copy
+  // button). Uses a sibling tab so we don't navigate the project page away.
+  const resolveLiveUrlFallback = async (currentLiveUrl) => {
+    if (currentLiveUrl || !projectId) {
+      return currentLiveUrl;
+    }
+    let dashPage = null;
+    try {
+      dashPage = await page.context().newPage();
+      const dashState = await getDashboardProjectState(dashPage, { projectId });
+      const dashLiveUrl = dashState?.project?.liveUrl || null;
+      if (dashLiveUrl) {
+        return normalizePublishUrl(dashLiveUrl) || dashLiveUrl;
+      }
+      return currentLiveUrl;
+    } catch {
+      return currentLiveUrl;
+    } finally {
+      if (dashPage) {
+        await dashPage.close().catch(() => {});
+      }
+    }
+  };
+
   if (state.step === "published" && !state.canUpdate) {
-    const liveCheck = state.liveUrl
-      ? await probeUrlStatus(state.liveUrl)
+    const alreadyLiveUrl = await resolveLiveUrlFallback(state.liveUrl);
+    const liveCheck = alreadyLiveUrl
+      ? await probeUrlStatus(alreadyLiveUrl)
       : null;
 
     return {
       ok: true,
       alreadyPublished: true,
-      liveUrl: state.liveUrl,
+      liveUrl: alreadyLiveUrl,
       liveCheck,
       state,
       stepHistory,
@@ -4217,11 +4249,12 @@ export async function publishProject(page, {
   }
 
   if (state.step === "published" && !state.canUpdate) {
+    const alreadyLiveUrl = await resolveLiveUrlFallback(state.liveUrl);
     return {
       ok: true,
       alreadyPublished: true,
-      liveUrl: state.liveUrl,
-      liveCheck: state.liveUrl ? await probeUrlStatus(state.liveUrl) : null,
+      liveUrl: alreadyLiveUrl,
+      liveCheck: alreadyLiveUrl ? await probeUrlStatus(alreadyLiveUrl) : null,
       state,
       stepHistory,
       publishEvents: [],
@@ -4307,9 +4340,14 @@ export async function publishProject(page, {
 
     stepHistory.push(summarizePublishState(state));
 
-    const intendedLiveUrl = state?.liveUrl ||
+    let intendedLiveUrl = state?.liveUrl ||
       [...stepHistory].reverse().map((entry) => entry.liveUrl).find(Boolean) ||
       null;
+
+    // The wizard surface sometimes hides the live URL behind a copy
+    // button; fall back to the dashboard project record via a sibling
+    // tab using the shared helper.
+    intendedLiveUrl = await resolveLiveUrlFallback(intendedLiveUrl);
 
     if (!intendedLiveUrl) {
       throw new Error("Lovable publish flow never exposed a live URL.");
