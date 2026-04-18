@@ -44,9 +44,15 @@
     "generate:commands": "node ./scripts/generate-command-reference.mjs",
     "check:commands": "node ./scripts/generate-command-reference.mjs --check",
     "test": "node --test ./test/browser.attachments.test.js ./test/browser.idle.test.js ./test/browser.multiline.test.js ./test/dashboard.test.js ./test/init.test.js ./test/orchestration.test.js ./test/profile.test.js ./test/prompt-match.test.js ./test/publish-classify.test.js ./test/publish.test.js ./test/url.test.js ./test/version.test.js",
-    "check:syntax": "node --check ./src/browser.js && node --check ./src/cli.js && node --check ./src/config.js && node --check ./src/orchestration.js && node --check ./src/profile.js && node --check ./src/publish.js && node --check ./src/url.js && node --check ./scripts/publish-to-npm.mjs",
+    "check:syntax": "node --check ./src/browser.js && node --check ./src/cli.js && node --check ./src/config.js && node --check ./src/orchestration.js && node --check ./src/profile.js && node --check ./src/publish.js && node --check ./src/url.js && node --check ./scripts/publish-to-npm.mjs && node --check ./scripts/release.mjs",
     "check": "npm run check:syntax && npm test && npm run check:commands",
     "ci": "npm run check",
+    "prerelease": "npm run generate:commands && npm run check",
+    "release": "node ./scripts/release.mjs",
+    "release:patch": "node ./scripts/release.mjs patch",
+    "release:minor": "node ./scripts/release.mjs minor",
+    "release:major": "node ./scripts/release.mjs major",
+    "prepublishOnly": "npm run check",
     "publish:ci": "node ./scripts/publish-to-npm.mjs"
   },
   "dependencies": {
