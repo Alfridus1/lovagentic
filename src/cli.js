@@ -335,6 +335,151 @@ async function detectPlaywright() {
 }
 
 program
+  .command("init")
+  .description("Scaffold a .lovagentic.json config file, prompt templates, and .env.example in the current directory.")
+  .option("--project-url <url>", "Lovable project URL to bind to (optional)")
+  .option("--dir <path>", "Target directory (defaults to current working directory)", ".")
+  .option("--force", "Overwrite existing files", false)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (options) => {
+    const targetDir = path.resolve(options.dir);
+    await fs.mkdir(targetDir, { recursive: true });
+    await fs.mkdir(path.join(targetDir, "prompts"), { recursive: true });
+
+    const files = [];
+    const skipped = [];
+
+    const writeFile = async (relPath, content) => {
+      const abs = path.join(targetDir, relPath);
+      const exists = await pathExists(abs);
+      if (exists && !options.force) {
+        skipped.push(relPath);
+        return false;
+      }
+      await fs.writeFile(abs, content, "utf8");
+      files.push(relPath);
+      return true;
+    };
+
+    const projectUrl = options.projectUrl || "https://lovable.dev/projects/REPLACE-ME";
+
+    const config = {
+      $schema: "https://lovagentic.com/schema/v1.json",
+      version: 1,
+      projectUrl,
+      defaults: {
+        headless: false,
+        verifyEffect: true,
+        timeoutMs: 480000
+      },
+      prompts: {
+        dir: "./prompts"
+      },
+      ci: {
+        autoRetry: false,
+        failOnPublishMismatch: true
+      }
+    };
+
+    await writeFile(".lovagentic.json", JSON.stringify(config, null, 2) + "\n");
+
+    const envExample = [
+      "# lovagentic .env.example",
+      "# Copy to .env and fill in values. Do NOT commit .env.",
+      "",
+      "# Optional: override project URL",
+      `LOVABLE_PROJECT_URL=${projectUrl}`,
+      "",
+      "# Optional (v0.2+): point lovagentic at an MCP backend",
+      "# LOVABLE_MCP_URL=https://mcp.lovable.dev",
+      "",
+      "# Optional: custom browser profile path",
+      "# LOVAGENTIC_PROFILE_DIR=~/.lovagentic/profile",
+      ""
+    ].join("\n");
+    await writeFile(".env.example", envExample);
+
+    const gitignoreEntry = ".env\nlovagentic-screenshots/\n";
+    const gitignorePath = path.join(targetDir, ".gitignore");
+    const existingGitignore = await pathExists(gitignorePath);
+    if (existingGitignore) {
+      const cur = await fs.readFile(gitignorePath, "utf8");
+      if (!/^\.env$/m.test(cur)) {
+        await fs.writeFile(gitignorePath, cur + (cur.endsWith("\n") ? "" : "\n") + gitignoreEntry, "utf8");
+        files.push(".gitignore (updated)");
+      } else {
+        skipped.push(".gitignore (already has .env)");
+      }
+    } else {
+      await writeFile(".gitignore", gitignoreEntry);
+    }
+
+    const examplePrompt = [
+      "# Example lovagentic prompt",
+      "",
+      "Save me as prompts/example.md and run:",
+      "",
+      "```bash",
+      "lovagentic prompt \"$LOVABLE_PROJECT_URL\" \\",
+      "  --prompt-file ./prompts/example.md \\",
+      "  --verify-effect \\",
+      "  --headless",
+      "```",
+      "",
+      "---",
+      "",
+      "Replace this file with a real prompt describing what you want Lovable to build or change.",
+      ""
+    ].join("\n");
+    await writeFile("prompts/example.md", examplePrompt);
+
+    const readme = [
+      "# lovagentic project",
+      "",
+      `Project: ${projectUrl}`,
+      "",
+      "## Quickstart",
+      "",
+      "```bash",
+      "cp .env.example .env   # then edit",
+      "lovagentic doctor      # verify your setup",
+      "lovagentic prompt \"$LOVABLE_PROJECT_URL\" \\",
+      "  --prompt-file ./prompts/example.md \\",
+      "  --verify-effect",
+      "```",
+      "",
+      "See https://lovagentic.com/docs for full docs.",
+      ""
+    ].join("\n");
+    await writeFile("README.md", readme);
+
+    if (options.json) {
+      console.log(JSON.stringify({
+        ok: true,
+        targetDir,
+        projectUrl,
+        filesCreated: files,
+        filesSkipped: skipped
+      }, null, 2));
+    } else {
+      console.log(`✓ Initialized lovagentic project at ${targetDir}`);
+      console.log("");
+      console.log("Files created:");
+      for (const f of files) console.log(`  ✓ ${f}`);
+      if (skipped.length > 0) {
+        console.log("");
+        console.log("Files skipped (already exist, use --force to overwrite):");
+        for (const f of skipped) console.log(`  − ${f}`);
+      }
+      console.log("");
+      console.log("Next steps:");
+      console.log("  1. cp .env.example .env   # then edit with your project URL");
+      console.log("  2. lovagentic doctor      # verify setup");
+      console.log("  3. lovagentic prompt \"$LOVABLE_PROJECT_URL\" --prompt-file ./prompts/example.md --verify-effect");
+    }
+  });
+
+program
   .command("import-desktop-session")
   .description("Copy the desktop app session files into the CLI browser profile.")
   .option("--profile-dir <path>", "Override the CLI browser profile path")
@@ -1626,7 +1771,10 @@ program
   .option("--fail-on-console", "Treat live-site console warnings/errors as blocking during verify", false)
   .option("--expect-text <text>", "Assert that live-site body text contains this string", collectValues, [])
   .option("--forbid-text <text>", "Assert that live-site body text does not contain this string", collectValues, [])
+  .option("--json", "Print machine-readable JSON", false)
   .action(async (targetUrl, options) => {
+    const json = Boolean(options.json);
+    const log = (msg) => { if (!json) console.log(msg); };
     const profileDir = getProfileDir(options.profileDir);
     if (options.seedDesktopSession) {
       await seedDesktopProfileIntoPlaywrightDefault({
@@ -1642,6 +1790,7 @@ program
     });
 
     let keepOpen = Boolean(options.keepOpen);
+    let verificationSummaryPath = null;
 
     try {
       const page = context.pages()[0] || await context.newPage();
@@ -1662,28 +1811,28 @@ program
       });
 
       if (result.alreadyPublished) {
-        console.log("Project is already published.");
+        log("Project is already published.");
       } else if (result.updatedExisting) {
-        console.log("Lovable updated the published site.");
+        log("Lovable updated the published site.");
       } else {
-        console.log("Lovable completed the publish flow.");
+        log("Lovable completed the publish flow.");
         if (result.siteInfoUpdated) {
-          console.log("Lovable auto-updated the site metadata in index.html because the website info step was incomplete.");
+          log("Lovable auto-updated the site metadata in index.html because the website info step was incomplete.");
         }
       }
 
       if (result.deploymentId) {
-        console.log(`Deployment ID: ${result.deploymentId}`);
+        log(`Deployment ID: ${result.deploymentId}`);
       }
 
       if (result.liveUrl) {
-        console.log(`Live URL: ${result.liveUrl}`);
+        log(`Live URL: ${result.liveUrl}`);
       }
 
       if (result.liveCheck?.status) {
-        console.log(`Live URL status: ${result.liveCheck.status}`);
+        log(`Live URL status: ${result.liveCheck.status}`);
       } else if (result.liveCheck?.error) {
-        console.log(`Live URL probe error: ${result.liveCheck.error}`);
+        log(`Live URL probe error: ${result.liveCheck.error}`);
       }
 
       if (options.verifyLive) {
@@ -1703,11 +1852,25 @@ program
           sourceLabel: "Live site",
           summarySourceKey: "liveSource"
         });
-        console.log(`Live verification summary: ${verification.summaryPath}`);
+        verificationSummaryPath = verification.summaryPath;
+        log(`Live verification summary: ${verification.summaryPath}`);
+      }
+
+      if (json) {
+        console.log(JSON.stringify({
+          ok: true,
+          alreadyPublished: Boolean(result.alreadyPublished),
+          updatedExisting: Boolean(result.updatedExisting),
+          siteInfoUpdated: Boolean(result.siteInfoUpdated),
+          deploymentId: result.deploymentId ?? null,
+          liveUrl: result.liveUrl ?? null,
+          liveCheck: result.liveCheck ?? null,
+          verificationSummaryPath
+        }, null, 2));
       }
 
       if (keepOpen) {
-        console.log("Browser left open for inspection. Press Ctrl+C when done.");
+        log("Browser left open for inspection. Press Ctrl+C when done.");
         await new Promise(() => {});
       }
     } finally {
@@ -2542,7 +2705,9 @@ program
   .option("--expect-text <text>", "Assert that preview body text contains this string", collectValues, [])
   .option("--forbid-text <text>", "Assert that preview body text does not contain this string", collectValues, [])
   .option("--authenticated", "Reuse the Lovable browser profile when capturing previews so unpublished/private routes render (defaults to anonymous)", false)
+  .option("--json", "Print machine-readable JSON with summary path and results", false)
   .action(async (targetUrl, options) => {
+    const json = Boolean(options.json);
     const profileDir = getProfileDir(options.profileDir);
     if (options.seedDesktopSession) {
       await seedDesktopProfileIntoPlaywrightDefault({
@@ -2594,7 +2759,7 @@ program
         await context.close();
       }
 
-      await runPreviewVerification({
+      const verification = await runPreviewVerification({
         page: options.authenticated ? null : page,
         normalizedUrl,
         outputDir,
@@ -2612,6 +2777,15 @@ program
           ? { src: `https://${normalizedUrl.match(/\/projects\/([^/?#]+)/)?.[1]}.lovableproject.com/` }
           : null
       });
+
+      if (json) {
+        console.log(JSON.stringify({
+          ok: !verification?.summary?.blocking,
+          summaryPath: verification?.summaryPath ?? null,
+          summary: verification?.summary ?? null,
+          outputDir
+        }, null, 2));
+      }
     } finally {
       if (!options.authenticated) {
         await context.close();

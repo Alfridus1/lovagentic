@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-04-18
+
+### Added
+
+- `lovagentic init` scaffolds a new project directory with `.lovagentic.json`, `.env.example`, `.gitignore`, `prompts/example.md`, and `README.md`. Existing files are skipped unless `--force` is used, and an existing `.gitignore` is augmented in place (not overwritten). Supports `--json` for CI pipelines.
+- `publish --json` emits a machine-readable result containing `alreadyPublished`, `updatedExisting`, `siteInfoUpdated`, `deploymentId`, `liveUrl`, `liveCheck`, and `verificationSummaryPath` fields.
+- `verify --json` emits a machine-readable result containing `ok`, `summaryPath`, `summary`, and `outputDir` fields.
+- `test/init.test.js` adds 5 regression tests covering scaffolding, idempotency, `--force` overwrite, `--json` output, and `.gitignore` preservation.
+
 ## [0.1.9] - 2026-04-18
 
 ### Added
