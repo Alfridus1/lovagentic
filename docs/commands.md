@@ -17,6 +17,7 @@ Options:
 
 Commands:
   doctor [options]                                 Inspect the local Lovable desktop install, CLI profile, Node, and Playwright.
+  init [options]                                   Scaffold a .lovagentic.json config file, prompt templates, and .env.example in the current directory.
   import-desktop-session [options]                 Copy the desktop app session files into the CLI browser profile.
   login [options]                                  Open a persistent browser profile and wait for a Lovable session.
   list [options]                                   List Lovable dashboard projects plus the visible workspace menu entries.
@@ -53,6 +54,7 @@ Commands:
 ## Commands
 
 - [`doctor`](#doctor)
+- [`init`](#init)
 - [`import-desktop-session`](#import-desktop-session)
 - [`login`](#login)
 - [`list`](#list)
@@ -99,6 +101,23 @@ Options:
                                 Chromium, seed CLI profile from desktop session)
                                 (default: false)
   -h, --help                    display help for command
+```
+
+## init
+
+```text
+Usage: lovagentic init [options]
+
+Scaffold a .lovagentic.json config file, prompt templates, and .env.example in
+the current directory.
+
+Options:
+  --project-url <url>  Lovable project URL to bind to (optional)
+  --dir <path>         Target directory (defaults to current working directory)
+                       (default: ".")
+  --force              Overwrite existing files (default: false)
+  --json               Print machine-readable JSON (default: false)
+  -h, --help           display help for command
 ```
 
 ## import-desktop-session
@@ -717,6 +736,7 @@ Options:
                                 string (default: [])
   --forbid-text <text>          Assert that live-site body text does not contain
                                 this string (default: [])
+  --json                        Print machine-readable JSON (default: false)
   -h, --help                    display help for command
 ```
 
@@ -1131,5 +1151,10 @@ Options:
                                 string (default: [])
   --forbid-text <text>          Assert that preview body text does not contain
                                 this string (default: [])
+  --authenticated               Reuse the Lovable browser profile when capturing
+                                previews so unpublished/private routes render
+                                (defaults to anonymous) (default: false)
+  --json                        Print machine-readable JSON with summary path
+                                and results (default: false)
   -h, --help                    display help for command
 ```
