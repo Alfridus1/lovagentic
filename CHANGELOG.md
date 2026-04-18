@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-04-18
+
+### Fixed
+
+- Lovable UI regression: Radix popovers (e.g. "Feeling stuck? Use plan mode to create a plan before you build.") were intercepting pointer events on the composer focus click and the send button, causing headless prompt submission to hang on `<p>…</p> from <div data-radix-popper-content-wrapper="">…</div> subtree intercepts pointer events` with Playwright click retries. The `fillPrompt` path now proactively removes stray popper wrappers before clicking the composer and falls back to `{ force: true }` if the intercept survives. `submitPrompt` runs the same dismissal (Escape → corner-click → DOM removal) and bypasses the click path entirely in favour of `Meta+Enter`/`Control+Enter` when a popover cannot be dismissed. Prompt submission is now resilient against arbitrary Radix popovers that appear mid-flow.
+
 ## [0.1.10] - 2026-04-18
 
 ### Added

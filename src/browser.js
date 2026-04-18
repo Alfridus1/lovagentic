@@ -215,7 +215,31 @@ async function readEditableText(target) {
 async function fillEditableTarget(page, target, text) {
   const tagName = await target.evaluate((element) => element.tagName.toLowerCase());
 
-  await target.click();
+  // Radix popovers (e.g. "Feeling stuck? Use plan mode…") can intercept the
+  // focus click on the composer. Remove any stray popover wrappers before the
+  // click, and fall back to force-click if the intercept persists.
+  await page.evaluate(() => {
+    const popovers = document.querySelectorAll("[data-radix-popper-content-wrapper]");
+    for (const el of popovers) {
+      try { el.remove(); } catch { /* ignore */ }
+    }
+  }).catch(() => {});
+
+  try {
+    await target.click({ timeout: 8000 });
+  } catch (error) {
+    if (/intercepts pointer events|not receive pointer events/i.test(String(error?.message))) {
+      await page.evaluate(() => {
+        const popovers = document.querySelectorAll("[data-radix-popper-content-wrapper]");
+        for (const el of popovers) {
+          try { el.remove(); } catch { /* ignore */ }
+        }
+      }).catch(() => {});
+      await target.click({ force: true, timeout: 8000 });
+    } else {
+      throw error;
+    }
+  }
 
   if (tagName === "textarea" || tagName === "input") {
     await target.fill(text);
@@ -382,9 +406,62 @@ export async function uploadPromptAttachments(page, filePaths, {
   );
 }
 
+async function dismissBlockingPopovers(page) {
+  // Lovable sometimes leaves a Radix popover open (e.g. "Feeling stuck? Use plan
+  // mode to create a plan before you build.") that intercepts pointer events on
+  // the send button. Escape usually works; as a last resort we forcibly detach
+  // the popper wrapper from the DOM so the click can land on the real button.
+  try {
+    const hasPopover = await page.evaluate(() =>
+      Boolean(document.querySelector("[data-radix-popper-content-wrapper]"))
+    );
+    if (!hasPopover) return;
+
+    // Pass 1: Escape key.
+    for (let i = 0; i < 3; i += 1) {
+      await page.keyboard.press("Escape").catch(() => {});
+      await page.waitForTimeout(120);
+    }
+
+    // Pass 2: click near top-left corner to defocus whatever triggered the popover.
+    const stillThere = await page.evaluate(() =>
+      Boolean(document.querySelector("[data-radix-popper-content-wrapper]"))
+    );
+    if (stillThere) {
+      await page.mouse.click(8, 8).catch(() => {});
+      await page.waitForTimeout(150);
+    }
+
+    // Pass 3: forcibly remove any remaining popper wrappers from the DOM.
+    await page.evaluate(() => {
+      const popovers = document.querySelectorAll("[data-radix-popper-content-wrapper]");
+      for (const el of popovers) {
+        try { el.remove(); } catch { /* ignore */ }
+      }
+    }).catch(() => {});
+  } catch {
+    // Best-effort; never block the submit path on popover cleanup.
+  }
+}
+
 export async function submitPrompt(page, {
   submitSelector
 } = {}) {
+  await dismissBlockingPopovers(page);
+
+  // If a persistent popover survives dismissal, skip click attempts and go
+  // straight to keyboard shortcut — Cmd/Ctrl+Enter always bypasses hit-testing.
+  const popoverSurvived = await page.evaluate(() =>
+    Boolean(document.querySelector("[data-radix-popper-content-wrapper]"))
+  ).catch(() => false);
+
+  if (popoverSurvived) {
+    for (const shortcut of SUBMIT_SHORTCUTS) {
+      await page.keyboard.press(shortcut).catch(() => {});
+      return { method: "shortcut-popover-bypass", shortcut };
+    }
+  }
+
   const roleBasedSend = [
     page.getByRole("button", { name: /Send message/i }).first(),
     page.getByRole("button", { name: /^Send$/i }).first()
@@ -404,8 +481,19 @@ export async function submitPrompt(page, {
       continue;
     }
 
-    await candidate.click();
-    return { method: "click", selector: "role=button[name=/Send message/i]" };
+    try {
+      await candidate.click({ timeout: 8000 });
+      return { method: "click", selector: "role=button[name=/Send message/i]" };
+    } catch (clickError) {
+      // Pointer-intercept retry: wipe popovers and click with { force: true } as
+      // a last resort so persistent Radix tooltips can't block the send path.
+      if (/intercepts pointer events|not receive pointer events/i.test(String(clickError?.message))) {
+        await dismissBlockingPopovers(page);
+        await candidate.click({ force: true, timeout: 8000 });
+        return { method: "click-forced", selector: "role=button[name=/Send message/i]" };
+      }
+      throw clickError;
+    }
   }
 
   const selectors = submitSelector ? [submitSelector] : SUBMIT_SELECTORS;
