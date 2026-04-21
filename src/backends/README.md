@@ -12,7 +12,7 @@ shape (TypeScript-like pseudo for readability, we are in plain JS):
 
 ```
 {
-  kind: 'browser' | 'mcp',
+  kind: 'browser' | 'api' | 'mcp',
   features: Set<string>,                   // capability flags (see CAPABILITIES)
 
   // Session / auth
@@ -57,6 +57,39 @@ Drives Lovable through a Playwright persistent context. All methods map
 onto the web-UI flows exposed in `../browser.js`. Works against every
 Lovable tier, no API access required. Fails loud on UI drift.
 
+### `api` (v0.2 prep)
+
+Wraps the official preview `@lovable.dev/sdk` package. It is selected in
+`auto` mode only when `LOVABLE_API_KEY` or `LOVABLE_BEARER_TOKEN` is
+configured and the requested capabilities are covered by the SDK-backed
+adapter.
+
+Current API-backed capability groups:
+
+- workspaces and projects
+- project creation, project state, project readiness
+- prompt submission, plan mode, file attachments
+- publish and published URL polling
+- project/workspace knowledge
+- code file listing, file reads, diffs, edit history
+- MCP server/connector catalog reads and MCP server CRUD
+- analytics reads
+- Lovable Cloud database status/provision/query helpers
+
+CLI commands wired to this backend today:
+
+- `list`
+- `create`
+- `prompt`
+- `publish`
+- `knowledge`
+- `status`
+- `code`
+
+Playwright remains the fallback for visual verification, Lighthouse, UI
+question cards, proposal chips, runtime error buttons, GitHub OAuth, and
+domain/settings fields that the SDK does not expose yet.
+
 ### `mcp` (planned scaffold)
 
 Placeholder for a future public, documented Lovable Model Context Protocol
@@ -67,11 +100,12 @@ runs use the `browser` backend.
 
 `getBackend({ backend, features })`:
 
-1. If `backend === 'mcp'` is explicitly requested, try MCP. If
-   capability check fails, throw (no silent fallback).
+1. If `backend === 'api'` or `backend === 'mcp'` is explicitly requested,
+   construct that backend. If auth or capability checks fail, throw.
 2. If `backend === 'browser'` is explicitly requested, use browser.
-3. If `backend === 'auto'` (default): try MCP only when configured. Since the
-   current MCP backend is a scaffold, normal runs fall back to browser.
+3. If `backend === 'auto'` (default): try API when configured, then MCP when
+   configured, then browser. Browser remains the safe fallback for UI-only
+   surfaces.
 
 ## Capability flags
 

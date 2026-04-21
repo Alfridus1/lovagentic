@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Added the official Lovable API SDK dependency (`@lovable.dev/sdk`) and an `api` command for local SDK/auth readiness checks.
+- Added `src/backends/api-backend.js`, a thin official-API backend adapter covering API-key auth, projects, prompts, plan mode, attachments, publish, knowledge, code/diffs, remix, MCP servers/connectors, analytics, and Lovable Cloud database helpers.
+- Added `npm run check:lovable-sdk` plus a scheduled GitHub Actions watcher that opens a tracking issue when npm publishes a newer `@lovable.dev/sdk` than the lockfile uses.
+- Added API-first execution paths for `list`, `create`, `prompt`, `publish`, `knowledge`, `status`, and `code` behind `--backend auto|api|browser`.
+
+### Changed
+
+- Backend auto-selection now tries the official API backend first when `LOVABLE_API_KEY` or `LOVABLE_BEARER_TOKEN` is configured, then MCP if configured, then the browser backend.
+- `doctor` now reports official API SDK installation and API auth readiness without printing secrets.
+
 ## [0.1.13] - 2026-04-21
 
 ### Changed

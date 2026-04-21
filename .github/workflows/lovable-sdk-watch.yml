@@ -1,0 +1,78 @@
+name: Lovable SDK Watch
+
+on:
+  schedule:
+    - cron: "12 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check @lovable.dev/sdk version
+        id: sdk
+        run: |
+          set +e
+          node scripts/check-lovable-sdk.mjs --json > sdk-check.json
+          status=$?
+          cat sdk-check.json
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" -eq 2 ]; then
+            exit 2
+          fi
+
+      - name: Open tracking issue for new SDK release
+        if: steps.sdk.outputs.status == '1'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require("fs");
+            const result = JSON.parse(fs.readFileSync("sdk-check.json", "utf8"));
+            const title = `Track @lovable.dev/sdk ${result.latest}`;
+            const marker = "<!-- lovagentic-sdk-watch -->";
+            const { owner, repo } = context.repo;
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: "open",
+              per_page: 20,
+            });
+            const existing = issues.find((issue) => issue.title === title || issue.body?.includes(marker));
+            if (existing) {
+              core.info(`SDK watch issue already open: #${existing.number}`);
+              return;
+            }
+            await github.rest.issues.create({
+              owner,
+              repo,
+              title,
+              body: [
+                marker,
+                "",
+                "A new official Lovable SDK version is available.",
+                "",
+                `- Package: \`${result.package}\``,
+                `- Current lockfile version: \`${result.installed}\``,
+                `- Latest npm version: \`${result.latest}\``,
+                "",
+                "Review the SDK changelog/API surface, map new methods to `src/backends/api-backend.js`, and decide whether any CLI command should move from browser-first to API-first."
+              ].join("\n"),
+            });

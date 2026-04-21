@@ -5,6 +5,7 @@
 It focuses on:
 
 - official Lovable URLs
+- the official preview `@lovable.dev/sdk` when `LOVABLE_API_KEY` is available
 - Playwright automation against the Lovable web UI
 - persistent browser profiles with real Lovable sessions
 - explicit verification and persistence checks after write actions
@@ -37,12 +38,14 @@ If Lovable or Cloudflare triggers an interactive verification, headed runs are s
 | Version | Status | What changes |
 | --- | --- | --- |
 | **v0.1** | ✅ Available now (npm) | Browser automation. Headless Playwright control of every Lovable surface. |
-| **v0.2** | Planned | Native MCP backend once Lovable exposes a public, documented MCP surface. Same `lovagentic` CLI, with browser fallback for unsupported capabilities. |
+| **v0.2** | In prep | Hybrid backend: official Lovable API SDK first for supported capabilities, browser fallback for UI-only surfaces. MCP remains optional once Lovable exposes a documented server-side control surface. |
 | **v0.3** | Planned | CI/CD integrations for GitHub Actions, GitLab CI, and Vercel-oriented workflows. |
 | **v0.4** | Exploratory | Hosted control plane patterns for teams operating many Lovable projects. |
 
-The current npm package is intentionally browser-first. The MCP backend in
-`src/backends/` is a scaffold, not an active user-facing command.
+The current npm package is intentionally browser-first for UI surfaces, but it
+now includes an official API backend scaffold in `src/backends/api-backend.js`.
+Set `LOVABLE_API_KEY=lov_...` to validate SDK access and prepare API-first
+flows as Lovable exposes more capabilities.
 
 ## Why this repo exists
 
@@ -60,6 +63,7 @@ That keeps the repo maintainable and avoids coupling to private desktop internal
 - dashboard project and workspace listing
 - dashboard-backed project status reads
 - project creation from official build URLs
+- official API SDK configuration checks
 - prompt submission with server-side acceptance checks
 - `build` / `plan` mode switching
 - prompt auto-splitting, dry-run sizing, and markdown-aware chunk planning
@@ -74,6 +78,7 @@ That keeps the repo maintainable and avoids coupling to private desktop internal
 - publish, publish settings, and domain management
 - toolbar, project settings, workspace settings, git, code, knowledge, and speed surfaces
 - iterative `fidelity-loop` repair flows
+- daily GitHub Actions watcher for new `@lovable.dev/sdk` releases
 
 ## Repository layout
 
@@ -109,6 +114,7 @@ Supporting docs:
 - npm
 - Playwright Chromium installed
 - a valid Lovable account and session on the machine where the CLI runs
+- optional Lovable API key (`LOVABLE_API_KEY=lov_...`) for the official API backend
 
 ## Install
 
@@ -123,6 +129,18 @@ Inspect the local environment:
 
 ```bash
 npm run doctor
+```
+
+Inspect official API SDK readiness:
+
+```bash
+npm run start -- api --json
+```
+
+Validate API access when Lovable has issued a key:
+
+```bash
+LOVABLE_API_KEY="lov_..." npm run start -- api --validate
 ```
 
 Login once into the CLI-managed browser profile:
@@ -191,6 +209,64 @@ Important constraints:
 - headed runs are safer when interactive verification is likely
 - headless runs are practical, not guaranteed
 
+## Official API backend
+
+Lovable now publishes the preview SDK package `@lovable.dev/sdk`. When
+`LOVABLE_API_KEY` or `LOVABLE_BEARER_TOKEN` is configured, `lovagentic` uses the
+official API first for supported flows and keeps the browser backend as the
+compatibility layer for UI-only surfaces.
+
+Configure API access:
+
+```bash
+export LOVABLE_API_KEY="lov_..."
+npm run start -- api --validate
+```
+
+API-backed capabilities currently represented in `src/backends/api-backend.js`:
+
+- workspace/project listing and project creation
+- chat/prompt submission, plan mode, file attachments, and response polling
+- publish and published URL polling
+- project/workspace knowledge reads and writes
+- code file listing, file reads, diffs, and edit history
+- project visibility writes
+- remix flows
+- MCP server and connector inventory
+- project analytics and Lovable Cloud database helpers
+
+Commands that currently support `--backend auto|api|browser`:
+
+- `list`
+- `create`
+- `prompt`
+- `publish`
+- `knowledge`
+- `status`
+- `code`
+
+Default `auto` behavior uses the API only when API auth is configured. Use
+`--backend browser` to force the legacy Playwright path, or `--backend api` to
+fail closed when the official API cannot handle the command.
+
+No API key is required for the existing browser workflows. If neither
+`LOVABLE_API_KEY` nor `LOVABLE_BEARER_TOKEN` is set, `--backend auto` keeps using
+the Playwright browser backend.
+
+Browser fallback remains required for visual verification, Lighthouse speed
+audits, clarification cards, proposal chips, runtime error buttons, GitHub
+OAuth, domain setup, and settings fields that the SDK does not expose yet.
+
+To track SDK changes manually:
+
+```bash
+npm run check:lovable-sdk
+```
+
+The repository also has a scheduled GitHub Actions workflow that opens a
+tracking issue when npm publishes a newer `@lovable.dev/sdk` version than the
+lockfile uses.
+
 ## Core command groups
 
 ### Bootstrap and session
@@ -199,6 +275,7 @@ Important constraints:
 | --- | --- |
 | `init` | Scaffold a new project directory (`.lovagentic.json`, `.env.example`, `prompts/`, ...) |
 | `doctor` | Inspect local Lovable desktop and CLI profile state, plus network reachability |
+| `api` | Inspect or validate official Lovable API SDK configuration |
 | `import-desktop-session` | Seed Playwright profile from the macOS desktop app |
 | `login` | Create a CLI-managed browser session |
 | `list` | List dashboard projects and visible workspaces |

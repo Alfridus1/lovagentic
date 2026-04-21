@@ -3,15 +3,16 @@
 // Usage:
 //   import { getBackend } from './backends/index.js';
 //   const backend = await getBackend({
-//     backend: 'auto',                 // 'auto' | 'browser' | 'mcp'
+//     backend: 'auto',                 // 'auto' | 'browser' | 'api' | 'mcp'
 //     features: ['prompt.submit', 'verify.desktop'],
 //     browserOptions: { profileDir, headless: true },
+//     apiOptions: { apiKey: process.env.LOVABLE_API_KEY },
 //     mcpOptions: { transport: 'stdio', serverUrl: process.env.LOVABLE_MCP_URL }
 //   });
 
 import { CAPABILITIES, missingCapabilities } from "./capabilities.js";
 
-/** @typedef {'auto'|'browser'|'mcp'} BackendKind */
+/** @typedef {'auto'|'browser'|'api'|'mcp'} BackendKind */
 
 /**
  * Resolve and construct a backend.
@@ -20,6 +21,7 @@ import { CAPABILITIES, missingCapabilities } from "./capabilities.js";
  *   backend?: BackendKind,
  *   features?: string[],
  *   browserOptions?: object,
+ *   apiOptions?: object,
  *   mcpOptions?: object
  * }} options
  */
@@ -29,6 +31,15 @@ export async function getBackend(options = {}) {
 
   if (kind === "browser") {
     return await createBrowserBackend(options.browserOptions ?? {});
+  }
+
+  if (kind === "api") {
+    const api = await tryCreateApiBackend(options.apiOptions ?? {}, { silent: false });
+    if (!api) {
+      throw new Error("API backend requested but not available. Configure LOVABLE_API_KEY.");
+    }
+    failOnMissing(required, api.features, "api");
+    return api;
   }
 
   if (kind === "mcp") {
@@ -43,6 +54,11 @@ export async function getBackend(options = {}) {
   }
 
   // 'auto'
+  const api = await tryCreateApiBackend(options.apiOptions ?? {});
+  if (api && missingCapabilities(required, api.features).length === 0) {
+    return api;
+  }
+
   const mcp = await tryCreateMcpBackend(options.mcpOptions ?? {});
   if (mcp && missingCapabilities(required, mcp.features).length === 0) {
     return mcp;
@@ -63,6 +79,22 @@ function failOnMissing(required, supported, kind) {
 async function createBrowserBackend(options) {
   const { createBrowserBackend } = await import("./browser-backend.js");
   return await createBrowserBackend(options);
+}
+
+async function tryCreateApiBackend(options, control = {}) {
+  const apiKey = options.apiKey ?? process.env.LOVABLE_API_KEY;
+  const bearerToken = options.bearerToken ?? process.env.LOVABLE_BEARER_TOKEN;
+  if (!apiKey && !bearerToken) return null;
+  try {
+    const { createApiBackend } = await import("./api-backend.js");
+    return await createApiBackend(options);
+  } catch (err) {
+    if (control.silent === false) throw err;
+    if (process.env.LOVAGENTIC_DEBUG) {
+      console.error("[lovagentic] API backend unavailable:", err?.message || err);
+    }
+    return null;
+  }
 }
 
 async function tryCreateMcpBackend(options) {

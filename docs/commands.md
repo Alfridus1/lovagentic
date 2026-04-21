@@ -17,6 +17,7 @@ Options:
 
 Commands:
   doctor [options]                                 Inspect the local Lovable desktop install, CLI profile, Node, and Playwright.
+  api [options]                                    Inspect the official Lovable API SDK configuration and optionally validate the API key.
   init [options]                                   Scaffold a .lovagentic.json config file, prompt templates, and .env.example in the current directory.
   import-desktop-session [options]                 Copy the desktop app session files into the CLI browser profile.
   login [options]                                  Open a persistent browser profile and wait for a Lovable session.
@@ -54,6 +55,7 @@ Commands:
 ## Commands
 
 - [`doctor`](#doctor)
+- [`api`](#api)
 - [`init`](#init)
 - [`import-desktop-session`](#import-desktop-session)
 - [`login`](#login)
@@ -101,6 +103,23 @@ Options:
                                 Chromium, seed CLI profile from desktop session)
                                 (default: false)
   -h, --help                    display help for command
+```
+
+## api
+
+```text
+Usage: lovagentic api [options]
+
+Inspect the official Lovable API SDK configuration and optionally validate the
+API key.
+
+Options:
+  --base-url <url>  Override the Lovable API base URL (default:
+                    "https://api.lovable.dev")
+  --validate        Call the Lovable API with the configured key and report
+                    visible workspaces (default: false)
+  --json            Print machine-readable JSON (default: false)
+  -h, --help        display help for command
 ```
 
 ## init
@@ -176,6 +195,8 @@ Options:
                                 (default: 100)
   --limit <n>                   Limit human-readable rows; JSON output still
                                 includes all projects
+  --backend <kind>              Backend for supported flows: auto, browser, or
+                                api (default: "auto")
   --json                        Print the extracted dashboard state as JSON
                                 (default: false)
   -h, --help                    display help for command
@@ -201,6 +222,9 @@ Options:
                                 app before launch (default: false)
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --workspace <name>            Workspace name for Lovable auto-submit
+  --workspace-id <id>           Workspace ID for official API project creation
+  --backend <kind>              Backend for supported flows: auto, browser, or
+                                api (default: "auto")
   --headless                    Run automated create flow headlessly (default:
                                 false)
   --wait-for-project-ms <ms>    Wait timeout for project creation (default:
@@ -209,6 +233,8 @@ Options:
                                 (default: false)
   --no-open                     Print the URL without opening it
   --no-autosubmit               Disable autosubmit in the generated URL
+  --json                        Print machine-readable JSON for API creation
+                                (default: false)
   -h, --help                    display help for command
 ```
 
@@ -257,6 +283,8 @@ Options:
   --keep-open                     Leave the browser window open after prompt
                                   submission (default: false)
   --mode <mode>                   Switch Lovable to build or plan before sending
+  --backend <kind>                Backend for supported flows: auto, browser, or
+                                  api (default: "auto")
   --dry-run                       Print prompt size, chunking plan, and warnings
                                   without opening a browser (default: false)
   --chunked                       Force multipart prompt delivery even when the
@@ -714,6 +742,8 @@ Options:
                                 browser (default: false)
   --keep-open                   Leave the browser window open after publishing
                                 (default: false)
+  --backend <kind>              Backend for supported flows: auto, browser, or
+                                api (default: "auto")
   --timeout-ms <ms>             How long to wait for Lovable to finish
                                 publishing (default: 420000)
   --live-url-timeout-ms <ms>    How long to wait for the live site URL to return
@@ -874,6 +904,8 @@ Options:
                                 (default: 90000)
   --project-text <text>         Set the project knowledge text
   --workspace-text <text>       Set the workspace knowledge text
+  --backend <kind>              Backend for supported flows: auto, browser, or
+                                api (default: "auto")
   --json                        Print machine-readable JSON (default: false)
   -h, --help                    display help for command
 ```
@@ -960,6 +992,8 @@ Options:
                                 feed (default: 250)
   --page-size <n>               Pagination size for dashboard project requests
                                 (default: 100)
+  --backend <kind>              Backend for supported flows: auto, browser, or
+                                api (default: "auto")
   --json                        Print machine-readable JSON (default: false)
   -h, --help                    display help for command
 ```
@@ -990,6 +1024,8 @@ Options:
                                 requires --file (default: false)
   --output-path <path>          Where to write the downloaded file content
   --limit <n>                   Limit tree or search output (default: 200)
+  --backend <kind>              Backend for supported flows: auto, browser, or
+                                api (default: "auto")
   --json                        Print machine-readable JSON (default: false)
   -h, --help                    display help for command
 ```

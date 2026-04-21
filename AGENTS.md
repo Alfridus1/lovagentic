@@ -5,6 +5,7 @@
 `lovagentic` is a local prototype for steering Lovable through stable, user-owned surfaces:
 
 - official Lovable URLs for project creation
+- official preview Lovable API SDK calls when `LOVABLE_API_KEY` is configured
 - Playwright browser automation against `https://lovable.dev`
 - optional auth/session seeding from the installed Lovable macOS desktop profile
 
@@ -19,6 +20,7 @@ Repo-local OpenClaw skill:
 Use these surfaces:
 
 - browser automation on Lovable's web UI
+- official `@lovable.dev/sdk` methods exposed through `src/backends/api-backend.js`
 - persistent Playwright profiles
 - official public/live URLs for verification
 
@@ -34,6 +36,7 @@ Do not use these surfaces:
 - Node.js + npm
 - Playwright Chromium installed
 - a valid Lovable login session on the machine where the agent runs
+- optional `LOVABLE_API_KEY=lov_...` for official API-backed flows
 
 Install:
 
@@ -67,6 +70,7 @@ Core commands:
 npm run doctor
 npm run start -- login
 npm run start -- list
+npm run start -- api --json
 npm run start -- create "Build a simple landing page"
 npm run start -- prompt "https://lovable.dev/projects/..." "Add a hero CTA"
 npm run start -- prompt "https://lovable.dev/projects/..." "Use the attached files as reference." --file ./test/fixtures/reference-doc.pdf
@@ -102,6 +106,7 @@ Repo maintenance commands:
 npm run help
 npm test
 npm run check
+npm run check:lovable-sdk
 ```
 
 ## Safe Testing Policy
@@ -154,6 +159,8 @@ For a single end-to-end proposal run:
 ## What Currently Works
 
 - project creation through build URLs
+- official Lovable API SDK detection through `api` and `doctor`
+- API-first `list`, `create`, `prompt`, `publish`, `knowledge`, `status`, and `code` when `LOVABLE_API_KEY` or `LOVABLE_BEARER_TOKEN` is configured
 - dashboard project/workspace listing through the logged-in `/dashboard` page
 - prompt submission with server-side accept checks
 - local file attachments on prompt flows through Lovable's hidden chat file input
@@ -194,9 +201,11 @@ For a single end-to-end proposal run:
 - iterative preview assertion repair through `fidelity-loop`
 - workspace/account settings inspection across the visible settings sections
 - knowledge inspection, with guarded writes that fail if Lovable does not persist after reload
+- API backend adapter for SDK-backed workspace/project, prompt, publish, knowledge, code, MCP, analytics, database, and remix capabilities
 
 ## Known Gaps
 
+- API-first command coverage is partial. Browser fallback remains required for UI-only surfaces such as question cards, proposal chips, runtime error actions, domains, GitHub OAuth, and visual verification.
 - fresh custom-domain connection submission is implemented, but it has only been validated idempotently against already listed domains so far
 - domain purchase/registrar flows are not automated
 - headless login/prompt flows can still fail on verification challenges
