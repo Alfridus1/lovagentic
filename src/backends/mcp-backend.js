@@ -1,4 +1,4 @@
-// MCP backend — scaffold for v0.2.
+// MCP backend — scaffold for a future public Lovable MCP surface.
 //
 // When Lovable ships the official Model Context Protocol, this file wires
 // an MCP client against it and exposes the same Backend contract as
@@ -35,8 +35,8 @@ export async function createMcpBackend(options = {}) {
   // Until we have the live MCP schema, treat this as unavailable.
   void McpClient;
   throw new Error(
-    "Lovable MCP is not yet publicly available. " +
-      "lovagentic v0.2 will enable this backend the moment Lovable announces MCP support."
+    "Lovable MCP is not yet publicly available as a documented production surface. " +
+      "Use the default browser backend until an official MCP transport exists."
   );
 }
 

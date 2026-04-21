@@ -11,9 +11,9 @@
 Use the one-shot release script:
 
 ```bash
-npm run release:patch   # 0.1.10 -> 0.1.11
-npm run release:minor   # 0.1.10 -> 0.2.0
-npm run release:major   # 0.1.10 -> 1.0.0
+npm run release:patch   # x.y.z -> x.y.(z+1)
+npm run release:minor   # x.y.z -> x.(y+1).0
+npm run release:major   # x.y.z -> (x+1).0.0
 
 # Or pin an exact version:
 node ./scripts/release.mjs 0.2.0

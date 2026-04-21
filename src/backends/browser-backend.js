@@ -1,10 +1,9 @@
 // Browser backend — wraps the existing ../browser.js Playwright flows
 // behind the shared Backend contract.
 //
-// For v0.1 this is mostly a re-export layer so CLI commands can keep using
-// the thin helpers. v0.2 will make the CLI call backend methods directly
-// and this file will absorb the orchestration glue that currently lives in
-// cli.js.
+// For now this is mostly a re-export layer so CLI commands can keep using the
+// thin helpers. As the backend contract matures, this file can absorb the
+// orchestration glue that currently lives in cli.js.
 
 import { CAPABILITIES, ALL_CAPABILITIES } from "./capabilities.js";
 
@@ -52,8 +51,7 @@ export async function createBrowserBackend(options = {}) {
 
     async close() {
       // Browser contexts are owned by individual CLI commands today; nothing
-      // to do at the backend level. Placeholder for v0.2 when we hold a
-      // long-lived context.
+      // to do at the backend level. Placeholder for a future long-lived context.
     }
   };
 }

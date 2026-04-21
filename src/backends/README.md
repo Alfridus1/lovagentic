@@ -57,11 +57,11 @@ Drives Lovable through a Playwright persistent context. All methods map
 onto the web-UI flows exposed in `../browser.js`. Works against every
 Lovable tier, no API access required. Fails loud on UI drift.
 
-### `mcp` (v0.2, planned)
+### `mcp` (planned scaffold)
 
-Uses Lovable's official Model Context Protocol transport. Same contract,
-~10× faster, fully supported by Lovable. Falls back to `browser` backend
-when a capability is not yet exposed by MCP.
+Placeholder for a future public, documented Lovable Model Context Protocol
+transport. The scaffold intentionally refuses to construct today, so production
+runs use the `browser` backend.
 
 ## Selection policy
 
@@ -70,8 +70,8 @@ when a capability is not yet exposed by MCP.
 1. If `backend === 'mcp'` is explicitly requested, try MCP. If
    capability check fails, throw (no silent fallback).
 2. If `backend === 'browser'` is explicitly requested, use browser.
-3. If `backend === 'auto'` (default): try MCP. If MCP is not configured
-   or does not support any required `features`, fall back to browser.
+3. If `backend === 'auto'` (default): try MCP only when configured. Since the
+   current MCP backend is a scaffold, normal runs fall back to browser.
 
 ## Capability flags
 

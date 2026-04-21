@@ -37,11 +37,12 @@ If Lovable or Cloudflare triggers an interactive verification, headed runs are s
 | Version | Status | What changes |
 | --- | --- | --- |
 | **v0.1** | ✅ Available now (npm) | Browser automation. Headless Playwright control of every Lovable surface. |
-| **v0.2** | 🔵 Next week | Native MCP backend. Drops the browser layer when Lovable's official MCP ships. Same `lovagentic` CLI, ~10× faster, fully supported by Lovable. |
-| **v0.3** | 🟣 Soon | CI/CD plugins. First-class GitHub Actions, GitLab CI, and Vercel-build integrations. |
-| **v0.4** | ⚪ Future | Hosted control plane. Multi-tenant `lovagentic`-as-a-service for agencies and AI agent fleets running 100+ Lovable projects. |
+| **v0.2** | Planned | Native MCP backend once Lovable exposes a public, documented MCP surface. Same `lovagentic` CLI, with browser fallback for unsupported capabilities. |
+| **v0.3** | Planned | CI/CD integrations for GitHub Actions, GitLab CI, and Vercel-oriented workflows. |
+| **v0.4** | Exploratory | Hosted control plane patterns for teams operating many Lovable projects. |
 
-> Native MCP support coming next week — early access by Lovable.
+The current npm package is intentionally browser-first. The MCP backend in
+`src/backends/` is a scaffold, not an active user-facing command.
 
 ## Why this repo exists
 
