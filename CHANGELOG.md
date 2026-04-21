@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `publish` gives transient Lovable/Radix publish surfaces one cleanup-and-retry pass before failing with a missing `Continue` button. This avoids false stalls when the publish wizard briefly renders without exposing the actionable button.
+
+### Changed
+
+- Documented the Playwright browser harness and debugging workflow for headed runs, `PWDEBUG=1`, and local `scratch/` scripts.
+- Ignored local ad-hoc browser harness scripts so one-off Lovable project audits do not pollute `git status`.
+
 ## [0.1.11] - 2026-04-18
 
 ### Fixed

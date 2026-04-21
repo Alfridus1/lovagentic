@@ -10,3 +10,8 @@ test-results/
 .tmp/
 tmp/
 .DS_Store
+
+# Local ad-hoc browser harness scripts. Keep reusable coverage in test/ instead.
+scratch/
+sf-*.mjs
+snap-debug.mjs

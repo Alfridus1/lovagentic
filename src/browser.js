@@ -212,29 +212,32 @@ async function readEditableText(target) {
   });
 }
 
+async function removeRadixPopperWrappers(page) {
+  await page.evaluate(() => {
+    const popovers = document.querySelectorAll("[data-radix-popper-content-wrapper]");
+    for (const element of popovers) {
+      try {
+        element.remove();
+      } catch {
+        // Best-effort cleanup; callers handle the actual interaction failure.
+      }
+    }
+  }).catch(() => {});
+}
+
 async function fillEditableTarget(page, target, text) {
   const tagName = await target.evaluate((element) => element.tagName.toLowerCase());
 
   // Radix popovers (e.g. "Feeling stuck? Use plan mode…") can intercept the
   // focus click on the composer. Remove any stray popover wrappers before the
   // click, and fall back to force-click if the intercept persists.
-  await page.evaluate(() => {
-    const popovers = document.querySelectorAll("[data-radix-popper-content-wrapper]");
-    for (const el of popovers) {
-      try { el.remove(); } catch { /* ignore */ }
-    }
-  }).catch(() => {});
+  await removeRadixPopperWrappers(page);
 
   try {
     await target.click({ timeout: 8000 });
   } catch (error) {
     if (/intercepts pointer events|not receive pointer events/i.test(String(error?.message))) {
-      await page.evaluate(() => {
-        const popovers = document.querySelectorAll("[data-radix-popper-content-wrapper]");
-        for (const el of popovers) {
-          try { el.remove(); } catch { /* ignore */ }
-        }
-      }).catch(() => {});
+      await removeRadixPopperWrappers(page);
       await target.click({ force: true, timeout: 8000 });
     } else {
       throw error;
@@ -433,12 +436,7 @@ async function dismissBlockingPopovers(page) {
     }
 
     // Pass 3: forcibly remove any remaining popper wrappers from the DOM.
-    await page.evaluate(() => {
-      const popovers = document.querySelectorAll("[data-radix-popper-content-wrapper]");
-      for (const el of popovers) {
-        try { el.remove(); } catch { /* ignore */ }
-      }
-    }).catch(() => {});
+    await removeRadixPopperWrappers(page);
   } catch {
     // Best-effort; never block the submit path on popover cleanup.
   }
@@ -4317,7 +4315,18 @@ export async function publishProject(page, {
     }
 
     if (!state.canContinue) {
-      throw new Error(`Lovable publish wizard stalled at "${state.step}" without a Continue button.`);
+      // The surface detection can race against Radix's render; give it one more
+      // breath plus a popover-dismissal pass before giving up. Many "stalled at
+      // website_info" reports turn out to be fleeting rendering states where the
+      // Continue button simply wasn't observed in the first snapshot.
+      await removeRadixPopperWrappers(page);
+      await page.waitForTimeout(1500);
+      state = await waitForPublishSurfaceChange(page, state, {
+        timeoutMs: stepTimeoutMs
+      }) || state;
+      if (!state.canContinue) {
+        throw new Error(`Lovable publish wizard stalled at "${state.step}" without a Continue button.`);
+      }
     }
 
     await clickPublishSurfaceButton(page, "Continue", {

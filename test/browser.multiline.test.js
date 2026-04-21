@@ -80,6 +80,57 @@ test("fillPrompt inserts multiline contenteditable text without Enter keydowns",
   });
 });
 
+test("fillPrompt and submitPrompt dismiss blocking Radix popovers", async () => {
+  await withPage(async (page) => {
+    await page.setContent(`
+      <div
+        data-radix-popper-content-wrapper
+        style="position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.01);"
+      >
+        Blocking popover
+      </div>
+      <div
+        id="prompt"
+        contenteditable="true"
+        aria-label="Chat input"
+        style="min-height: 80px; width: 500px; border: 1px solid #999;"
+      ></div>
+      <button
+        id="submit"
+        aria-label="Send message"
+        onclick="window.submittedText = document.querySelector('#prompt').innerText;"
+      >
+        Send message
+      </button>
+    `);
+
+    await fillPrompt(page, "Ship this change.", {
+      selector: "#prompt"
+    });
+
+    assert.equal(await page.locator("[data-radix-popper-content-wrapper]").count(), 0);
+
+    await page.evaluate(() => {
+      const popover = document.createElement("div");
+      popover.setAttribute("data-radix-popper-content-wrapper", "");
+      popover.style.position = "fixed";
+      popover.style.inset = "0";
+      popover.style.zIndex = "9999";
+      popover.style.background = "rgba(0, 0, 0, 0.01)";
+      popover.textContent = "Second blocking popover";
+      document.body.appendChild(popover);
+    });
+
+    const submitResult = await submitPrompt(page, {
+      submitSelector: "#submit"
+    });
+
+    assert.match(submitResult.method, /^click/);
+    assert.equal(await page.locator("[data-radix-popper-content-wrapper]").count(), 0);
+    assert.equal(await page.evaluate(() => window.submittedText), "Ship this change.");
+  });
+});
+
 test("waitForPromptResult matches multiline prompts after whitespace normalization", async () => {
   await withPage(async (page) => {
     const prompt = [
