@@ -22,7 +22,7 @@ node ./scripts/release.mjs 0.2.0
 The script runs, in order:
 
 1. Preflight: ensure working tree is clean and on `main` (overrides: `--allow-dirty`, `--branch <name>`).
-2. Bump `package.json` version.
+2. Bump `package.json` and `package-lock.json` version.
 3. Regenerate [`docs/commands.md`](./commands.md) from the live CLI definitions.
 4. Run the full `npm run check` suite (syntax + tests + command reference).
 5. Commit the bump + regenerated docs as `chore(release): vX.Y.Z`.

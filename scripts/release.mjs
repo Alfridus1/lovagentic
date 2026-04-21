@@ -4,7 +4,7 @@
  *
  * Responsibilities (in order):
  *   1. Verify working tree is clean and on main.
- *   2. Bump package.json version (patch | minor | major | x.y.z).
+ *   2. Bump package.json and package-lock.json version (patch | minor | major | x.y.z).
  *   3. Regenerate docs/commands.md via scripts/generate-command-reference.mjs.
  *   4. Run full check suite (lint/syntax + tests + command reference check).
  *   5. Commit bump + regenerated docs.
@@ -101,6 +101,23 @@ function writeJson(p, data) {
   fs.writeFileSync(p, JSON.stringify(data, null, 2) + "\n", "utf8");
 }
 
+function writePackageLockVersion({ packageName, version }) {
+  const lockPath = path.join(repoRoot, "package-lock.json");
+  if (!fs.existsSync(lockPath)) {
+    return false;
+  }
+
+  const lock = readJson(lockPath);
+  lock.name = packageName;
+  lock.version = version;
+  if (lock.packages?.[""]) {
+    lock.packages[""].name = packageName;
+    lock.packages[""].version = version;
+  }
+  writeJson(lockPath, lock);
+  return true;
+}
+
 function bumpSemver(current, target) {
   if (/^\d+\.\d+\.\d+$/.test(target)) return target;
   const match = current.match(/^(\d+)\.(\d+)\.(\d+)(.*)$/);
@@ -159,6 +176,10 @@ async function main() {
   if (!flags.dryRun) {
     pkg.version = nextVersion;
     writeJson(pkgPath, pkg);
+    writePackageLockVersion({
+      packageName: pkg.name,
+      version: nextVersion
+    });
   }
 
   // --- 3. Regenerate command reference ---
@@ -179,7 +200,11 @@ async function main() {
   }
 
   log(`Committing release ${tag}`);
-  runSync("git", ["add", "package.json", "docs/commands.md"]);
+  const releaseFiles = ["package.json", "docs/commands.md"];
+  if (fs.existsSync(path.join(repoRoot, "package-lock.json"))) {
+    releaseFiles.push("package-lock.json");
+  }
+  runSync("git", ["add", ...releaseFiles]);
 
   // Include CHANGELOG.md if it was modified (common pattern).
   const stagedStatus = runSync("git", ["status", "--porcelain"]).stdout;
