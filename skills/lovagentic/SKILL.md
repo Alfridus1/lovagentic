@@ -1,6 +1,6 @@
 ---
 name: lovagentic
-description: "Use this repo-local skill when work should drive Lovable through the `lovagentic` project in this repository: list dashboard projects/workspaces, inspect toolbar/settings/git/code/speed/domain surfaces, create apps, send prompts, guard against truncated prompts, answer Lovable clarification cards, switch build/plan, click proposal actions, inspect runtime errors with `Try to fix`, extract security findings, verify previews, and publish Lovable projects. Prefer this skill over ad hoc browser scripting when the task targets `lovable.dev` and can be done through the CLI. Do not use it for private desktop reverse engineering or unsupported domain-purchase flows."
+description: "Use this repo-local skill when work should drive Lovable through the `lovagentic` project in this repository: inspect official API SDK readiness, list dashboard projects/workspaces, inspect toolbar/settings/git/code/speed/domain surfaces, create apps, send prompts, guard against truncated prompts, answer Lovable clarification cards, switch build/plan, click proposal actions, inspect runtime errors with `Try to fix`, extract security findings, verify previews, and publish Lovable projects. Prefer this skill over ad hoc browser scripting when the task targets `lovable.dev` and can be done through the CLI. Do not use it for private desktop reverse engineering or unsupported domain-purchase flows."
 metadata:
   {
     "openclaw":
@@ -20,6 +20,8 @@ Use the local CLI in this repo instead of rebuilding Lovable browser flows from 
 Use this skill for:
 
 - Lovable project creation through build URLs
+- official Lovable API SDK readiness checks through `api`
+- API-first `list`, `create`, `prompt`, `publish`, `knowledge`, `status`, and `code` through `--backend auto|api|browser`
 - dashboard project/workspace listing through `list`
 - top-toolbar inspection through `toolbar`
 - project settings reads and safe writes through `project-settings`
@@ -83,6 +85,12 @@ npm run start -- list \
   --profile-dir /tmp/lovagentic-task \
   --seed-desktop-session \
   --headless
+
+npm run start -- api --json
+
+LOVABLE_API_KEY="lov_..." npm run start -- api --validate
+
+LOVABLE_API_KEY="lov_..." npm run start -- list --backend api --json
 
 npm run start -- chat-loop "<project-url>" "<prompt>" \
   --mode plan \

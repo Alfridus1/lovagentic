@@ -20,6 +20,21 @@ try {
   // keep fallback
 }
 
+function getInstalledPackageVersion(packageName) {
+  try {
+    const pkgPath = path.resolve(
+      __dirname_cli,
+      "..",
+      "node_modules",
+      ...packageName.split("/"),
+      "package.json"
+    );
+    return JSON.parse(readFileSync(pkgPath, "utf8")).version ?? null;
+  } catch {
+    return null;
+  }
+}
+
 import {
   DEFAULT_BASE_URL,
   DEFAULT_DESKTOP_APP_PATH,
@@ -134,7 +149,7 @@ program
       }
     }
 
-    const { checks, playwrightDefaultDir } = result;
+    const { checks, playwrightDefaultDir, api } = result;
     const failed = checks.filter((c) => !c.ok);
 
     if (options.json) {
@@ -145,6 +160,8 @@ program
         checks,
         paths: { profileDir, desktopProfileDir, playwrightDefaultDir },
         node: process.version,
+        api,
+        apiConfigured: api.configured,
         mcpConfigured: Boolean(process.env.LOVABLE_MCP_URL)
       }, null, 2));
     } else {
@@ -188,6 +205,14 @@ async function runDoctorChecks({ profileDir, desktopProfileDir }) {
   const nodeOk = nodeMajor >= 20;
 
   const pwStatus = await detectPlaywright();
+  const lovableSdkVersion = getInstalledPackageVersion("@lovable.dev/sdk");
+  const api = {
+    configured: Boolean(process.env.LOVABLE_API_KEY || process.env.LOVABLE_BEARER_TOKEN),
+    apiKeyConfigured: Boolean(process.env.LOVABLE_API_KEY),
+    bearerTokenConfigured: Boolean(process.env.LOVABLE_BEARER_TOKEN),
+    baseUrl: process.env.LOVABLE_API_BASE_URL || "https://api.lovable.dev",
+    sdkVersion: lovableSdkVersion
+  };
   const mcpConfigured = Boolean(process.env.LOVABLE_MCP_URL);
 
   // Network reachability checks (fast, ~3s timeout each, in parallel).
@@ -202,13 +227,87 @@ async function runDoctorChecks({ profileDir, desktopProfileDir }) {
     { key: "cliCookies", label: "CLI cookies", ok: cliCookieFileExists, healable: true, hint: cliCookieFileExists ? null : "CLI profile has no session. Run `lovagentic import-desktop-session` or `lovagentic doctor --self-heal`." },
     { key: "playwright", label: `Playwright (${pwStatus.version ?? "not installed"})`, ok: pwStatus.installed, healable: false, hint: pwStatus.installed ? null : "Run `npm install` in the lovagentic repo, or install the npm package." },
     { key: "chromium", label: "Playwright Chromium binary", ok: pwStatus.chromium, healable: true, hint: pwStatus.chromium ? null : "Run `npx playwright install chromium`, or `lovagentic doctor --self-heal`." },
+    { key: "lovableApiSdk", label: `Lovable API SDK (@lovable.dev/sdk ${lovableSdkVersion ?? "not installed"})`, ok: Boolean(lovableSdkVersion), healable: false, hint: lovableSdkVersion ? null : "Run `npm install @lovable.dev/sdk` to enable the official API backend scaffold." },
+    { key: "lovableApiAuth", label: `Lovable API auth (${api.configured ? "configured" : "not configured"})`, ok: true, healable: false, hint: api.configured ? "Official API backend can be used for supported capabilities." : "Set LOVABLE_API_KEY=lov_... once Lovable grants API access. Browser backend remains the fallback." },
     { key: "lovableReachable", label: `lovable.dev reachable${network.lovable.ms != null ? ` (${network.lovable.ms}ms)` : ""}`, ok: network.lovable.ok, healable: false, hint: network.lovable.ok ? null : `Cannot reach https://lovable.dev (${network.lovable.error ?? "unknown error"}). Check internet connection or corporate proxy.` },
     { key: "npmReachable", label: `npm registry reachable${network.npm.ms != null ? ` (${network.npm.ms}ms)` : ""}`, ok: network.npm.ok, healable: false, hint: network.npm.ok ? null : `Cannot reach registry.npmjs.org (${network.npm.error ?? "unknown error"}). Required for self-update checks.` },
     { key: "mcp", label: `MCP backend (${mcpConfigured ? "configured" : "not configured"})`, ok: true, healable: false, hint: mcpConfigured ? null : "LOVABLE_MCP_URL not set. Using browser backend. MCP support ships in v0.2." }
   ];
 
-  return { checks, playwrightDefaultDir };
+  return { checks, playwrightDefaultDir, api };
 }
+
+program
+  .command("api")
+  .description("Inspect the official Lovable API SDK configuration and optionally validate the API key.")
+  .option("--base-url <url>", "Override the Lovable API base URL", "https://api.lovable.dev")
+  .option("--validate", "Call the Lovable API with the configured key and report visible workspaces", false)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (options) => {
+    const sdkVersion = getInstalledPackageVersion("@lovable.dev/sdk");
+    const configured = Boolean(process.env.LOVABLE_API_KEY || process.env.LOVABLE_BEARER_TOKEN);
+    const result = {
+      configured,
+      apiKeyConfigured: Boolean(process.env.LOVABLE_API_KEY),
+      bearerTokenConfigured: Boolean(process.env.LOVABLE_BEARER_TOKEN),
+      baseUrl: options.baseUrl,
+      sdkVersion,
+      validated: false,
+      user: null,
+      workspaces: [],
+      error: null
+    };
+
+    if (options.validate) {
+      if (!configured) {
+        result.error = "LOVABLE_API_KEY or LOVABLE_BEARER_TOKEN is not set.";
+      } else {
+        try {
+          const { createApiBackend } = await import("./backends/api-backend.js");
+          const backend = await createApiBackend({ baseUrl: options.baseUrl });
+          const me = await backend.me();
+          result.validated = true;
+          result.user = {
+            id: me.id,
+            email: me.email,
+            name: me.name
+          };
+          result.workspaces = (me.workspaces ?? []).map((workspace) => ({
+            id: workspace.id,
+            name: workspace.name,
+            role: workspace.role
+          }));
+        } catch (err) {
+          result.error = err?.message || String(err);
+        }
+      }
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`Lovable API SDK: ${sdkVersion ?? "not installed"}`);
+      console.log(`API auth: ${configured ? "configured" : "not configured"}`);
+      console.log(`Base URL: ${options.baseUrl}`);
+      if (options.validate) {
+        if (result.validated) {
+          console.log(`Validated user: ${result.user?.email ?? result.user?.id ?? "unknown"}`);
+          console.log(`Workspaces: ${result.workspaces.length}`);
+          for (const workspace of result.workspaces) {
+            console.log(`  - ${workspace.name} (${workspace.role})`);
+          }
+        } else {
+          console.log(`Validation failed: ${result.error}`);
+        }
+      } else if (!configured) {
+        console.log("Set LOVABLE_API_KEY=lov_... to enable API-backed flows.");
+      }
+    }
+
+    if (options.validate && !result.validated) {
+      process.exitCode = 1;
+    }
+  });
 
 async function runNetworkChecks() {
   const probe = async (url) => {
@@ -390,6 +489,10 @@ program
       "# Optional: override project URL",
       `LOVABLE_PROJECT_URL=${projectUrl}`,
       "",
+      "# Optional: official Lovable API backend",
+      "# LOVABLE_API_KEY=lov_...",
+      "# LOVABLE_API_BASE_URL=https://api.lovable.dev",
+      "",
       "# Optional (v0.2+): point lovagentic at an MCP backend",
       "# LOVABLE_MCP_URL=https://mcp.lovable.dev",
       "",
@@ -569,8 +672,25 @@ program
   .option("--poll-ms <ms>", "Polling interval while waiting for the dashboard feed", parseInteger, 250)
   .option("--page-size <n>", "Pagination size for dashboard project requests", parseInteger, 100)
   .option("--limit <n>", "Limit human-readable rows; JSON output still includes all projects", parseInteger)
+  .option("--backend <kind>", "Backend for supported flows: auto, browser, or api", "auto")
   .option("--json", "Print the extracted dashboard state as JSON", false)
   .action(async (options) => {
+    const apiBackend = await createApiBackendForCommand(options);
+    if (apiBackend) {
+      const result = await apiBackend.listProjects({
+        limit: options.pageSize
+      });
+      const state = buildDashboardStateFromApi(result);
+      if (options.json) {
+        console.log(JSON.stringify(state, null, 2));
+        return;
+      }
+      printDashboardState(state, {
+        limit: options.limit
+      });
+      return;
+    }
+
     const profileDir = getProfileDir(options.profileDir);
     if (options.seedDesktopSession) {
       await seedDesktopProfileIntoPlaywrightDefault({
@@ -627,12 +747,67 @@ program
   .option("--seed-desktop-session", "Refresh the Playwright profile from the desktop app before launch", false)
   .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
   .option("--workspace <name>", "Workspace name for Lovable auto-submit")
+  .option("--workspace-id <id>", "Workspace ID for official API project creation")
+  .option("--backend <kind>", "Backend for supported flows: auto, browser, or api", "auto")
   .option("--headless", "Run automated create flow headlessly", false)
   .option("--wait-for-project-ms <ms>", "Wait timeout for project creation", parseInteger, 480000)
   .option("--keep-open", "Leave the browser open after project creation", false)
   .option("--no-open", "Print the URL without opening it")
   .option("--no-autosubmit", "Disable autosubmit in the generated URL")
+  .option("--json", "Print machine-readable JSON for API creation", false)
   .action(async (prompt, options) => {
+    const apiBackend = options.image.length === 0
+      ? await createApiBackendForCommand(options)
+      : null;
+    if (apiBackend) {
+      const workspace = await resolveApiWorkspace(apiBackend, {
+        workspaceId: options.workspaceId,
+        workspaceName: options.workspace
+      });
+      const project = await apiBackend.createProject(workspace.id, {
+        description: prompt,
+        initialMessage: prompt
+      });
+      let readyProject = project;
+      try {
+        readyProject = await apiBackend.waitForProjectReady(project.id, {
+          timeout: options.waitForProjectMs,
+          pollInterval: 2_000
+        });
+      } catch (err) {
+        readyProject = {
+          ...project,
+          waitError: err?.message || String(err)
+        };
+      }
+      const payload = {
+        backend: "api",
+        workspace: {
+          id: workspace.id,
+          name: workspace.name
+        },
+        project: readyProject,
+        projectUrl: buildLovableProjectUrl(project.id),
+        previewUrl: apiBackend.getPreviewUrl(project.id)
+      };
+
+      if (options.json) {
+        console.log(JSON.stringify(payload, null, 2));
+      } else {
+        console.log(`Project URL: ${payload.projectUrl}`);
+        console.log(`Preview URL: ${payload.previewUrl}`);
+        if (readyProject.waitError) {
+          console.log(`Project readiness wait: ${readyProject.waitError}`);
+        } else {
+          console.log(`Project status: ${readyProject.status || "unknown"}`);
+        }
+      }
+      return;
+    }
+    if (normalizeBackendChoice(options.backend) === "api" && options.image.length > 0) {
+      throw new Error("Official API create does not support --image URL references yet. Use --backend browser.");
+    }
+
     const url = buildCreateUrl({
       prompt,
       images: options.image,
@@ -767,6 +942,7 @@ program
   .option("--headless", "Run headlessly instead of opening a visible browser", false)
   .option("--keep-open", "Leave the browser window open after prompt submission", false)
   .option("--mode <mode>", "Switch Lovable to build or plan before sending")
+  .option("--backend <kind>", "Backend for supported flows: auto, browser, or api", "auto")
   .option("--dry-run", "Print prompt size, chunking plan, and warnings without opening a browser", false)
   .option("--chunked", "Force multipart prompt delivery even when the prompt might fit in one chunk", false)
   .option("--split-by <mode>", "Split multipart prompts by character count or markdown headings (chars|markdown)")
@@ -834,6 +1010,24 @@ program
         autoSplit: Boolean(options.autoSplit),
         chunked: Boolean(options.chunked),
         splitBy: options.splitBy
+      });
+      return;
+    }
+
+    if (normalizeBackendChoice(options.backend) === "api" && promptOptionsRequireBrowser(options)) {
+      throw new Error("This prompt option set requires the browser backend. Remove UI-only flags or use --backend browser.");
+    }
+
+    const apiBackend = !promptOptionsRequireBrowser(options)
+      ? await createApiBackendForCommand(options)
+      : null;
+    if (apiBackend) {
+      await runApiPromptFlow({
+        apiBackend,
+        targetUrl,
+        promptText,
+        attachmentPaths,
+        options
       });
       return;
     }
@@ -1760,6 +1954,7 @@ program
   .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
   .option("--headless", "Run headlessly instead of opening a visible browser", false)
   .option("--keep-open", "Leave the browser window open after publishing", false)
+  .option("--backend <kind>", "Backend for supported flows: auto, browser, or api", "auto")
   .option("--timeout-ms <ms>", "How long to wait for Lovable to finish publishing", parseInteger, 420000)
   .option("--live-url-timeout-ms <ms>", "How long to wait for the live site URL to return success", parseInteger, 300000)
   .option("--poll-ms <ms>", "Polling interval while waiting for the live site", parseInteger, 3000)
@@ -1775,6 +1970,71 @@ program
   .action(async (targetUrl, options) => {
     const json = Boolean(options.json);
     const log = (msg) => { if (!json) console.log(msg); };
+    if (normalizeBackendChoice(options.backend) === "api" && options.keepOpen) {
+      throw new Error("--keep-open requires the browser backend. Use --backend browser or remove --keep-open.");
+    }
+
+    const apiBackend = !options.keepOpen
+      ? await createApiBackendForCommand(options)
+      : null;
+    if (apiBackend) {
+      const { normalizedUrl, projectId } = getProjectIdFromUrl(targetUrl);
+      const deployment = await apiBackend.publish(projectId);
+      const project = await apiBackend.waitForProjectPublished(projectId, {
+        timeout: options.timeoutMs,
+        pollInterval: options.pollMs
+      });
+      const liveUrl = project.url || deployment.url || null;
+      const liveCheck = liveUrl ? await probePreviewUrl(liveUrl) : null;
+      let verificationSummaryPath = null;
+
+      if (options.verifyLive) {
+        if (!liveUrl) {
+          throw new Error("Lovable API publish completed without a live URL; cannot run --verify-live.");
+        }
+        const verification = await runUrlVerification({
+          targetUrl: normalizedUrl,
+          captureUrl: liveUrl,
+          outputDir: resolveLiveVerifyOutputDir(normalizedUrl, options.verifyOutputDir),
+          headless: true,
+          settleMs: options.verifySettleMs,
+          variants: getVerifyVariants({
+            desktopOnly: options.verifyDesktopOnly,
+            mobileOnly: options.verifyMobileOnly
+          }),
+          failOnConsole: Boolean(options.failOnConsole),
+          expectText: options.expectText,
+          forbidText: options.forbidText,
+          sourceLabel: "API live site",
+          summarySourceKey: "liveSource"
+        });
+        verificationSummaryPath = verification.summaryPath;
+      }
+
+      const payload = {
+        ok: true,
+        backend: "api",
+        alreadyPublished: false,
+        updatedExisting: false,
+        siteInfoUpdated: false,
+        deploymentId: deployment.deployment_id ?? null,
+        liveUrl,
+        liveCheck,
+        verificationSummaryPath
+      };
+
+      if (json) {
+        console.log(JSON.stringify(payload, null, 2));
+      } else {
+        log("Lovable API completed the publish flow.");
+        if (payload.deploymentId) log(`Deployment ID: ${payload.deploymentId}`);
+        if (payload.liveUrl) log(`Live URL: ${payload.liveUrl}`);
+        if (payload.liveCheck?.status) log(`Live URL status: ${payload.liveCheck.status}`);
+        if (verificationSummaryPath) log(`Live verification summary: ${verificationSummaryPath}`);
+      }
+      return;
+    }
+
     const profileDir = getProfileDir(options.profileDir);
     if (options.seedDesktopSession) {
       await seedDesktopProfileIntoPlaywrightDefault({
@@ -2139,8 +2399,25 @@ addProjectSessionOptions(
   .option("--timeout-ms <ms>", "How long to wait for the knowledge settings page", parseInteger, 90_000)
   .option("--project-text <text>", "Set the project knowledge text")
   .option("--workspace-text <text>", "Set the workspace knowledge text")
+  .option("--backend <kind>", "Backend for supported flows: auto, browser, or api", "auto")
   .option("--json", "Print machine-readable JSON", false)
   .action(async (targetUrl, options) => {
+    const apiBackend = await createApiBackendForCommand(options);
+    if (apiBackend) {
+      const result = await buildApiKnowledgeResult(apiBackend, targetUrl, options);
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      if (result.changes.length > 0) {
+        console.log(`Updated knowledge via API: ${result.changes.join(", ")}`);
+      } else {
+        console.log("No knowledge changes requested.");
+      }
+      printKnowledgeState(result.state);
+      return;
+    }
+
     await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
       const hasRequestedChanges = options.projectText !== undefined || options.workspaceText !== undefined;
       const result = hasRequestedChanges
@@ -2278,8 +2555,22 @@ addProjectSessionOptions(
   .option("--dashboard-timeout-ms <ms>", "How long to wait for the dashboard project feed", parseInteger, 20_000)
   .option("--dashboard-poll-ms <ms>", "Polling interval while waiting for the dashboard feed", parseInteger, 250)
   .option("--page-size <n>", "Pagination size for dashboard project requests", parseInteger, 100)
+  .option("--backend <kind>", "Backend for supported flows: auto, browser, or api", "auto")
   .option("--json", "Print machine-readable JSON", false)
   .action(async (targetUrl, options) => {
+    const apiBackend = await createApiBackendForCommand(options);
+    if (apiBackend) {
+      const state = await buildApiStatusState(apiBackend, targetUrl, {
+        provider: options.provider
+      });
+      if (options.json) {
+        console.log(JSON.stringify(state, null, 2));
+        return;
+      }
+      printProjectStatusState(state);
+      return;
+    }
+
     await withProjectPageSession(targetUrl, options, async ({ context, page, normalizedUrl }) => {
       const projectId = normalizedUrl.match(/\/projects\/([^/?#]+)/)?.[1] || null;
       if (!projectId) {
@@ -2391,8 +2682,31 @@ addProjectSessionOptions(
   .option("--download", "Write the requested file content to disk; requires --file", false)
   .option("--output-path <path>", "Where to write the downloaded file content")
   .option("--limit <n>", "Limit tree or search output", parseInteger, 200)
+  .option("--backend <kind>", "Backend for supported flows: auto, browser, or api", "auto")
   .option("--json", "Print machine-readable JSON", false)
   .action(async (targetUrl, options) => {
+    const backendChoice = normalizeBackendChoice(options.backend);
+    const apiBackend = (!options.search || backendChoice === "api")
+      ? await createApiBackendForCommand(options)
+      : null;
+    if (apiBackend) {
+      const state = await buildCodeStateFromApi({
+        apiBackend,
+        targetUrl,
+        filePath: options.file,
+        searchQuery: options.search,
+        limit: options.limit,
+        download: Boolean(options.download),
+        outputPath: options.outputPath
+      });
+      if (options.json) {
+        console.log(JSON.stringify(state, null, 2));
+        return;
+      }
+      printCodeState(state);
+      return;
+    }
+
     await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
       const gitState = await getProjectGitState(page, {
         projectUrl: normalizedUrl,
@@ -2806,6 +3120,10 @@ function addProjectSessionOptions(command) {
     .option("--headless", "Run headlessly instead of opening a visible browser", false);
 }
 
+function addBackendOption(command) {
+  return command.option("--backend <kind>", "Backend for supported flows: auto, browser, or api", "auto");
+}
+
 async function withProjectPageSession(targetUrl, options, callback) {
   const profileDir = getProfileDir(options.profileDir);
   if (options.seedDesktopSession) {
@@ -2845,6 +3163,297 @@ async function withProjectPageSession(targetUrl, options, callback) {
   }
 }
 
+function normalizeBackendChoice(value = "auto") {
+  const normalized = String(value || "auto").trim().toLowerCase();
+  if (!["auto", "browser", "api"].includes(normalized)) {
+    throw new Error(`Unsupported backend "${value}". Use auto, browser, or api.`);
+  }
+  return normalized;
+}
+
+function hasOfficialApiAuth() {
+  return Boolean(process.env.LOVABLE_API_KEY || process.env.LOVABLE_BEARER_TOKEN);
+}
+
+async function createApiBackendForCommand(options = {}) {
+  const backend = normalizeBackendChoice(options.backend);
+  if (backend === "browser") {
+    return null;
+  }
+  if (backend === "auto" && !hasOfficialApiAuth()) {
+    return null;
+  }
+
+  try {
+    const { createApiBackend } = await import("./backends/api-backend.js");
+    return await createApiBackend();
+  } catch (err) {
+    if (backend === "api") {
+      throw err;
+    }
+    return null;
+  }
+}
+
+function getProjectIdFromUrl(targetUrl) {
+  const normalizedUrl = normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL);
+  const projectId = normalizedUrl.match(/\/projects\/([^/?#]+)/)?.[1] || null;
+  if (!projectId) {
+    throw new Error("Expected a Lovable project URL.");
+  }
+  return {
+    normalizedUrl,
+    projectId
+  };
+}
+
+function buildLovableProjectUrl(projectId) {
+  return new URL(`/projects/${projectId}`, DEFAULT_BASE_URL).toString();
+}
+
+function mapApiProject(project, workspaceById = new Map()) {
+  const workspaceId = project.workspace_id || project.workspaceId || null;
+  const workspace = workspaceId ? workspaceById.get(workspaceId) : null;
+  const title = project.display_name || project.name || project.description || project.id;
+  return {
+    id: project.id,
+    title,
+    slug: project.name || project.display_name || null,
+    projectUrl: buildLovableProjectUrl(project.id),
+    workspaceId,
+    workspaceName: workspace?.name || null,
+    collections: ["api"],
+    editCount: project.edit_count ?? project.gen_count ?? null,
+    lastEditedAt: project.last_edited_at || null,
+    updatedAt: project.updated_at || null,
+    lastViewedAt: project.last_viewed_at || null,
+    published: Boolean(project.is_published),
+    liveUrl: project.url || null,
+    raw: project
+  };
+}
+
+function buildDashboardStateFromApi(result) {
+  const workspaces = result.workspaces ?? [];
+  const workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
+  const projects = (result.projects ?? []).map((project) => mapApiProject(project, workspaceById));
+  const currentWorkspace = workspaces[0]
+    ? {
+        id: workspaces[0].id,
+        name: workspaces[0].name,
+        meta: workspaces[0].membership?.role || workspaces[0].role || null
+      }
+    : null;
+
+  return {
+    source: "api",
+    dashboardUrl: "https://api.lovable.dev/v1/workspaces/*/projects",
+    currentWorkspace,
+    workspaces: workspaces.map((workspace, index) => ({
+      id: workspace.id,
+      name: workspace.name,
+      current: index === 0,
+      meta: workspace.membership?.role || workspace.role || null
+    })),
+    projects,
+    collections: {
+      workspace: { count: projects.length },
+      recent: { count: 0 },
+      shared: { count: 0 },
+      starred: { count: projects.filter((project) => project.raw?.is_starred).length }
+    }
+  };
+}
+
+async function resolveApiWorkspace(apiBackend, {
+  workspaceId,
+  workspaceName
+} = {}) {
+  const workspaces = await apiBackend.listWorkspaces();
+  if (workspaceId) {
+    const workspace = workspaces.find((entry) => entry.id === workspaceId);
+    if (!workspace) {
+      throw new Error(`Workspace id not found through Lovable API: ${workspaceId}`);
+    }
+    return workspace;
+  }
+
+  if (workspaceName) {
+    const normalizedName = workspaceName.trim().toLowerCase();
+    const exact = workspaces.find((entry) => String(entry.name || "").trim().toLowerCase() === normalizedName);
+    const fuzzy = exact || workspaces.find((entry) => String(entry.name || "").trim().toLowerCase().includes(normalizedName));
+    if (!fuzzy) {
+      throw new Error(`Workspace not found through Lovable API: ${workspaceName}`);
+    }
+    return fuzzy;
+  }
+
+  if (!workspaces[0]) {
+    throw new Error("Lovable API returned no accessible workspaces.");
+  }
+  return workspaces[0];
+}
+
+async function buildApiStatusState(apiBackend, targetUrl, {
+  provider = "github"
+} = {}) {
+  const { normalizedUrl, projectId } = getProjectIdFromUrl(targetUrl);
+  const project = await apiBackend.getProjectState(projectId);
+  const previewUrl = apiBackend.getPreviewUrl(projectId);
+  const previewRootUrl = buildPreviewRouteUrl(previewUrl, "/");
+  const previewHead = await probePreviewUrl(previewRootUrl);
+
+  return {
+    backend: "api",
+    projectUrl: normalizedUrl,
+    projectId,
+    title: project.display_name || project.name || project.description || "(unknown)",
+    slug: project.name || null,
+    workspaceName: project.workspace_id || null,
+    editCount: project.edit_count ?? project.gen_count ?? null,
+    lastEditedAt: project.last_edited_at || null,
+    updatedAt: project.updated_at || null,
+    lastViewedAt: project.last_viewed_at || null,
+    published: Boolean(project.is_published),
+    liveUrl: project.url || null,
+    git: {
+      connected: Boolean(project.is_github || project.github_repo_name),
+      repository: project.github_repo_name || null,
+      branch: project.main_branch || null,
+      provider,
+      error: null
+    },
+    preview: {
+      sourceUrl: redactPreviewUrl(previewUrl),
+      rootUrl: redactPreviewUrl(previewRootUrl),
+      headStatus: previewHead.status,
+      headOk: previewHead.ok,
+      finalUrl: previewHead.finalUrl ? redactPreviewUrl(previewHead.finalUrl) : null,
+      routeCountDetected: null,
+      error: null,
+      headError: previewHead.error || null
+    },
+    raw: project
+  };
+}
+
+async function buildApiKnowledgeResult(apiBackend, targetUrl, options = {}) {
+  const { normalizedUrl, projectId } = getProjectIdFromUrl(targetUrl);
+  const project = await apiBackend.getProjectState(projectId);
+  const workspaceId = project.workspace_id;
+  if (!workspaceId) {
+    throw new Error("Lovable API did not return workspace_id for this project.");
+  }
+
+  const changes = [];
+  if (options.projectText !== undefined) {
+    await apiBackend.setProjectKnowledge(projectId, options.projectText);
+    changes.push("projectKnowledge");
+  }
+  if (options.workspaceText !== undefined) {
+    await apiBackend.setWorkspaceKnowledge(workspaceId, options.workspaceText);
+    changes.push("workspaceKnowledge");
+  }
+
+  const [projectKnowledge, workspaceKnowledge] = await Promise.all([
+    apiBackend.getProjectKnowledge(projectId),
+    apiBackend.getWorkspaceKnowledge(workspaceId)
+  ]);
+
+  return {
+    changes,
+    state: {
+      backend: "api",
+      settingsUrl: `api://projects/${projectId}/knowledge`,
+      projectUrl: normalizedUrl,
+      projectId,
+      workspaceId,
+      projectKnowledge: projectKnowledge?.content || "",
+      workspaceKnowledge: workspaceKnowledge?.content || "",
+      projectPlaceholder: null,
+      workspacePlaceholder: null
+    }
+  };
+}
+
+async function buildCodeStateFromApi({
+  apiBackend,
+  targetUrl,
+  filePath,
+  searchQuery,
+  limit = 200,
+  download = false,
+  outputPath
+}) {
+  const { projectId } = getProjectIdFromUrl(targetUrl);
+  const project = await apiBackend.getProjectState(projectId);
+  const ref = project.latest_commit_sha || project.main_branch || "HEAD";
+  const repository = project.github_repo_name || project.name || projectId;
+  const state = {
+    source: "lovable-api",
+    repository,
+    branch: ref,
+    tree: null,
+    file: null,
+    search: null,
+    downloadPath: null
+  };
+
+  if (download && !filePath) {
+    throw new Error("--download requires --file.");
+  }
+
+  if (filePath) {
+    const content = await apiBackend.readFile(projectId, filePath, ref);
+    state.file = {
+      path: filePath,
+      type: "file",
+      size: Buffer.byteLength(content, "utf8"),
+      content
+    };
+
+    if (download) {
+      const resolvedOutputPath = path.resolve(outputPath || path.basename(filePath));
+      await fs.mkdir(path.dirname(resolvedOutputPath), { recursive: true });
+      await fs.writeFile(resolvedOutputPath, content);
+      state.downloadPath = resolvedOutputPath;
+    }
+  }
+
+  const filesResponse = !filePath || searchQuery
+    ? await apiBackend.listFiles(projectId, ref)
+    : null;
+  const files = filesResponse?.files ?? [];
+
+  if (searchQuery) {
+    const needle = String(searchQuery).toLowerCase();
+    const matches = files.filter((entry) => String(entry.path || "").toLowerCase().includes(needle));
+    state.search = {
+      query: searchQuery,
+      totalCount: matches.length,
+      items: matches.slice(0, limit).map((entry) => ({
+        name: path.basename(entry.path),
+        path: entry.path,
+        repository,
+        sha: ref
+      }))
+    };
+  }
+
+  if (!filePath && !searchQuery) {
+    state.tree = {
+      totalEntries: files.length,
+      entries: files.slice(0, limit).map((entry) => ({
+        path: entry.path,
+        type: entry.binary ? "binary" : "file",
+        size: entry.size ?? null
+      }))
+    };
+  }
+
+  return state;
+}
+
 function collectValues(value, previous) {
   previous.push(value);
   return previous;
@@ -2860,6 +3469,17 @@ function parseInteger(value) {
 
 function hasText(value) {
   return String(value || "").trim().length > 0;
+}
+
+function normalizePromptModeOption(mode) {
+  if (mode === undefined || mode === null || mode === "") {
+    return null;
+  }
+  const normalized = String(mode).trim().toLowerCase();
+  if (!["build", "plan"].includes(normalized)) {
+    throw new Error(`Unsupported prompt mode "${mode}". Use build or plan.`);
+  }
+  return normalized;
 }
 
 function capitalize(value) {
@@ -3839,6 +4459,109 @@ async function ensurePromptModeReady(page, mode) {
     changed: false,
     previousMode: currentMode,
     currentMode
+  };
+}
+
+function promptOptionsRequireBrowser(options = {}) {
+  return Boolean(
+    options.keepOpen ||
+    options.selector ||
+    options.submitSelector ||
+    options.answerQuestion ||
+    options.verifyEffect ||
+    options.autoResume
+  );
+}
+
+async function runApiPromptFlow({
+  apiBackend,
+  targetUrl,
+  promptText,
+  attachmentPaths = [],
+  options = {}
+} = {}) {
+  const { normalizedUrl, projectId } = getProjectIdFromUrl(targetUrl);
+  const hasPrompt = hasText(promptText);
+  const hasAttachments = attachmentPaths.length > 0;
+  const warnings = hasPrompt
+    ? assertPromptLooksComplete(promptText, {
+      allowFragment: Boolean(options.allowFragment)
+    })
+    : [];
+  const parts = hasPrompt
+    ? buildPromptSequence(promptText, {
+      autoSplit: Boolean(options.autoSplit),
+      chunked: Boolean(options.chunked),
+      splitBy: options.splitBy
+    })
+    : [{
+      index: 1,
+      total: 1,
+      rawPrompt: "",
+      prompt: "Use the attached files as reference.",
+      attachmentOnly: true
+    }];
+  const sequence = [];
+  const mode = normalizePromptModeOption(options.mode);
+
+  for (const warning of warnings) {
+    console.log(`Warning: ${warning}`);
+  }
+
+  for (const part of parts) {
+    const isFinalPart = part.index === part.total;
+    const response = await apiBackend.submitPrompt(projectId, {
+      message: part.prompt,
+      filePaths: part.index === 1 ? attachmentPaths : [],
+      planMode: mode === "plan",
+      mode,
+      wait: isFinalPart,
+      pollInterval: options.idlePollMs,
+      timeout: options.idleTimeoutMs
+    });
+
+    sequence.push({
+      backend: "api",
+      index: part.index,
+      total: part.total,
+      chars: part.prompt.length,
+      messageId: response.message_id,
+      status: response.status,
+      completion: response.completion || null,
+      attachmentsSent: part.index === 1 ? attachmentPaths.length : 0
+    });
+    console.log(`API prompt part ${part.index}/${part.total} accepted: ${response.message_id || response.status || "ok"}`);
+  }
+
+  if (options.verify) {
+    const previewUrl = apiBackend.getPreviewUrl(projectId);
+    const verification = await runUrlVerification({
+      targetUrl: normalizedUrl,
+      captureUrl: previewUrl,
+      outputDir: resolveVerifyOutputDir(normalizedUrl, options.verifyOutputDir),
+      headless: true,
+      settleMs: options.verifySettleMs,
+      variants: getVerifyVariants({
+        desktopOnly: options.verifyDesktopOnly,
+        mobileOnly: options.verifyMobileOnly
+      }),
+      failOnConsole: Boolean(options.failOnConsole),
+      expectText: options.expectText,
+      forbidText: options.forbidText,
+      sourceLabel: "API post-prompt preview"
+    });
+    console.log(`Post-prompt verification summary: ${verification.summaryPath}`);
+  }
+
+  if (hasAttachments && !hasPrompt) {
+    console.log(`Sent ${attachmentPaths.length} attachment(s) with a default reference message.`);
+  }
+
+  return {
+    backend: "api",
+    projectId,
+    projectUrl: normalizedUrl,
+    sequence
   };
 }
 

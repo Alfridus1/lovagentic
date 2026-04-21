@@ -4,6 +4,7 @@
 export const CAPABILITIES = Object.freeze({
   // Session / auth
   AUTH_SESSION: "auth.session",
+  AUTH_API_KEY: "auth.api-key",
 
   // Projects
   PROJECT_LIST: "project.list",
@@ -11,6 +12,7 @@ export const CAPABILITIES = Object.freeze({
   PROJECT_IDLE: "project.idle",
   PROJECT_CREATE: "project.create",
   PROJECT_DELETE: "project.delete",
+  PROJECT_REMIX: "project.remix",
 
   // Prompting
   PROMPT_SUBMIT: "prompt.submit",
@@ -44,6 +46,18 @@ export const CAPABILITIES = Object.freeze({
   GIT_CONNECT: "git.connect",
   GIT_DISCONNECT: "git.disconnect",
   GIT_RECONNECT: "git.reconnect",
+  CODE_LIST: "code.list",
+  CODE_READ: "code.read",
+  CODE_DIFF: "code.diff",
+  EDITS_LIST: "edits.list",
+
+  // Official API-only surfaces
+  MCP_SERVERS: "mcp.servers",
+  MCP_CONNECTORS: "mcp.connectors",
+  ANALYTICS_READ: "analytics.read",
+  DATABASE_STATUS: "database.status",
+  DATABASE_ENABLE: "database.enable",
+  DATABASE_QUERY: "database.query",
 
   // Verify / speed
   VERIFY_DESKTOP: "verify.desktop",
