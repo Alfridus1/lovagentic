@@ -23,6 +23,8 @@ lovagentic prompt "https://lovable.dev/projects/YOUR-ID" "Add a dark mode toggle
 
 That's it. Lovable builds. You ship.
 
+![lovagentic demo](.github/assets/demo.gif)
+
 ---
 
 ## What it does
