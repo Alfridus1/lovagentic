@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Added API-only `snapshot`, `diff`, and `runbook` commands. `snapshot` captures project state, URLs, knowledge, file trees, edit history, and optional file contents/MCP inventory. `diff` reads Lovable git diffs by message id, commit sha, or latest edit. `runbook` executes YAML/JSON orchestration steps for `snapshot`, `prompt`/`fix`, `wait`, `verify`, `diff`, and `publish`.
+- Added `src/api-ops.js` and `src/runbook.js` so API snapshot/diff and runbook parsing logic can be tested outside the Commander entrypoint.
+- Added regression tests for API diff summarization/latest-edit resolution and YAML/JSON runbook normalization/planning.
+- Clarified docs after reviewing Lovable's `llms-full.txt`: the public Lovable API docs currently position `Build with URL` as the first documented API release, so key-backed SDK flows are described as preview/availability-gated rather than a complete public API replacement for browser automation.
+
 ## [0.2.0] - 2026-04-21
 
 ### Added

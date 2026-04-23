@@ -5,7 +5,7 @@
 `lovagentic` is a local prototype for steering Lovable through stable, user-owned surfaces:
 
 - official Lovable URLs for project creation
-- official preview Lovable API SDK calls when `LOVABLE_API_KEY` is configured
+- `@lovable.dev/sdk` preview backend calls when `LOVABLE_API_KEY` is configured
 - Playwright browser automation against `https://lovable.dev`
 - optional auth/session seeding from the installed Lovable macOS desktop profile
 
@@ -36,7 +36,7 @@ Do not use these surfaces:
 - Node.js + npm
 - Playwright Chromium installed
 - a valid Lovable login session on the machine where the agent runs
-- optional `LOVABLE_API_KEY=lov_...` for official API-backed flows
+- optional `LOVABLE_API_KEY=lov_...` for SDK/API-backed flows when Lovable has granted access
 
 Install:
 
@@ -71,6 +71,9 @@ npm run doctor
 npm run start -- login
 npm run start -- list
 npm run start -- api --json
+npm run start -- snapshot "https://lovable.dev/projects/..." --output ./output/snapshot.json
+npm run start -- diff "https://lovable.dev/projects/..." --latest --json
+npm run start -- runbook ./runbook.yaml
 npm run start -- create "Build a simple landing page"
 npm run start -- prompt "https://lovable.dev/projects/..." "Add a hero CTA"
 npm run start -- prompt "https://lovable.dev/projects/..." "Use the attached files as reference." --file ./test/fixtures/reference-doc.pdf
@@ -143,6 +146,8 @@ For a new machine or new agent run:
 10. `npm run start -- code "<project-url>" --limit 20 --json`
 11. `npm run start -- speed "<project-url>" --device desktop --json`
 12. `npm run start -- wait-for-idle "<project-url>" --json`
+13. `LOVABLE_API_KEY=lov_... npm run start -- snapshot "<project-url>" --output ./output/smoke-snapshot.json`
+14. `LOVABLE_API_KEY=lov_... npm run start -- diff "<project-url>" --latest --json`
 
 For prompt regression checks:
 
@@ -159,8 +164,9 @@ For a single end-to-end proposal run:
 ## What Currently Works
 
 - project creation through build URLs
-- official Lovable API SDK detection through `api` and `doctor`
+- Lovable SDK/API readiness detection through `api` and `doctor`
 - API-first `list`, `create`, `prompt`, `publish`, `knowledge`, `status`, and `code` when `LOVABLE_API_KEY` or `LOVABLE_BEARER_TOKEN` is configured
+- API-only `snapshot`, `diff`, and `runbook` artifacts for deterministic agent handoff and CI-style orchestration
 - dashboard project/workspace listing through the logged-in `/dashboard` page
 - prompt submission with server-side accept checks
 - local file attachments on prompt flows through Lovable's hidden chat file input
@@ -202,10 +208,13 @@ For a single end-to-end proposal run:
 - workspace/account settings inspection across the visible settings sections
 - knowledge inspection, with guarded writes that fail if Lovable does not persist after reload
 - API backend adapter for SDK-backed workspace/project, prompt, publish, knowledge, code, MCP, analytics, database, and remix capabilities
+- YAML/JSON runbooks with `snapshot`, `prompt`/`fix`, `wait`, `verify`, `diff`, and `publish` steps
 
 ## Known Gaps
 
+- Lovable's public docs currently describe the Lovable API as a growing suite whose first release is `Build with URL`. Treat the key-backed SDK backend as preview/availability-gated even though the package is installed here.
 - API-first command coverage is partial. Browser fallback remains required for UI-only surfaces such as question cards, proposal chips, runtime error actions, domains, GitHub OAuth, and visual verification.
+- `runbook` uses the API for orchestration, but preview verification still uses Playwright screenshots because the SDK does not provide browser-rendered visual checks.
 - fresh custom-domain connection submission is implemented, but it has only been validated idempotently against already listed domains so far
 - domain purchase/registrar flows are not automated
 - headless login/prompt flows can still fail on verification challenges
