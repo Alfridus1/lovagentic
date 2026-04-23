@@ -36,6 +36,14 @@ function getInstalledPackageVersion(packageName) {
 }
 
 import {
+  buildApiDiff,
+  buildApiSnapshot,
+  formatDiffSummary,
+  formatSnapshotSummary,
+  getProjectIdFromTarget,
+  writeJsonFile
+} from "./api-ops.js";
+import {
   DEFAULT_BASE_URL,
   DEFAULT_DESKTOP_APP_PATH,
   getDesktopProfileDir,
@@ -105,6 +113,11 @@ import {
   shouldUseLenientPromptAck
 } from "./orchestration.js";
 import { pathExists, seedDesktopProfileIntoPlaywrightDefault } from "./profile.js";
+import {
+  getRunbookPlan,
+  normalizeRunbook,
+  parseRunbookText
+} from "./runbook.js";
 import {
   buildCreateUrl,
   buildPreviewRouteUrl,
@@ -2740,6 +2753,150 @@ addProjectSessionOptions(
     });
   });
 
+program
+  .command("snapshot")
+  .description("Capture an API-backed project snapshot: project state, URLs, knowledge, files, and edit history.")
+  .argument("<target-url>", "Lovable project URL or project id")
+  .option("--backend <kind>", "Backend for this flow: api only", "api")
+  .option("--ref <ref>", "Git ref for file listing/content (defaults to latest commit or HEAD)")
+  .option("--max-files <n>", "Maximum files to include in the file tree", parseInteger, 500)
+  .option("--max-edits <n>", "Maximum edits to include", parseInteger, 50)
+  .option("--no-files", "Skip project file listing")
+  .option("--file-content", "Include text file contents for listed non-binary files", false)
+  .option("--no-knowledge", "Skip project and workspace knowledge")
+  .option("--no-edits", "Skip edit history")
+  .option("--mcp", "Include workspace MCP servers/connectors/catalog", false)
+  .option("--output <path>", "Write the full snapshot JSON to this path")
+  .option("--json", "Print the full snapshot JSON", false)
+  .action(async (targetUrl, options) => {
+    const apiBackend = await requireApiBackendForCommand(options, "snapshot");
+    const snapshot = await buildApiSnapshot(apiBackend, targetUrl, {
+      ref: options.ref,
+      maxFiles: options.maxFiles,
+      maxEdits: options.maxEdits,
+      files: Boolean(options.files),
+      fileContent: Boolean(options.fileContent),
+      knowledge: Boolean(options.knowledge),
+      edits: Boolean(options.edits),
+      mcp: Boolean(options.mcp)
+    });
+
+    let outputPath = null;
+    if (options.output) {
+      outputPath = await writeJsonFile(options.output, snapshot);
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify({
+        ...snapshot,
+        outputPath
+      }, null, 2));
+      return;
+    }
+
+    console.log(formatSnapshotSummary(snapshot));
+    if (outputPath) {
+      console.log(`Output: ${outputPath}`);
+    }
+    if (snapshot.warnings.length > 0) {
+      console.log("");
+      console.log("Warnings:");
+      for (const warning of snapshot.warnings) {
+        console.log(`  - ${warning}`);
+      }
+    }
+  });
+
+program
+  .command("diff")
+  .description("Read an API-backed Lovable git diff for a message, commit, or latest edit.")
+  .argument("<target-url>", "Lovable project URL or project id")
+  .option("--backend <kind>", "Backend for this flow: api only", "api")
+  .option("--message-id <id>", "Message id to diff")
+  .option("--sha <sha>", "Commit sha to diff")
+  .option("--base-sha <sha>", "Optional base commit sha")
+  .option("--latest", "Resolve the latest edit and diff it", false)
+  .option("--output <path>", "Write the full diff JSON to this path")
+  .option("--json", "Print the full diff JSON", false)
+  .action(async (targetUrl, options) => {
+    const apiBackend = await requireApiBackendForCommand(options, "diff");
+    const diffState = await buildApiDiff(apiBackend, targetUrl, {
+      messageId: options.messageId,
+      sha: options.sha,
+      baseSha: options.baseSha,
+      latest: Boolean(options.latest)
+    });
+
+    let outputPath = null;
+    if (options.output) {
+      outputPath = await writeJsonFile(options.output, diffState);
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify({
+        ...diffState,
+        outputPath
+      }, null, 2));
+      return;
+    }
+
+    console.log(formatDiffSummary(diffState));
+    if (outputPath) {
+      console.log(`Output: ${outputPath}`);
+    }
+  });
+
+program
+  .command("runbook")
+  .description("Run a YAML/JSON Lovable orchestration plan: snapshot, prompt, wait, verify, diff, publish.")
+  .argument("<file>", "Runbook YAML or JSON file")
+  .option("--project-url <url>", "Override the project URL from the runbook")
+  .option("--output-dir <path>", "Override the runbook output directory")
+  .option("--backend <kind>", "Backend for API-backed runbook steps: api, auto, or browser", "api")
+  .option("--dry-run", "Validate and print the runbook plan without executing it", false)
+  .option("--continue-on-error", "Continue after failed steps and report all failures", false)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (file, options) => {
+    const runbookPath = path.resolve(file);
+    const raw = await fs.readFile(runbookPath, "utf8");
+    const parsed = parseRunbookText(raw, runbookPath);
+    const runbook = normalizeRunbook(parsed, {
+      projectUrl: options.projectUrl,
+      outputDir: options.outputDir ? path.resolve(options.outputDir) : undefined,
+      backend: options.backend
+    });
+    const plan = getRunbookPlan(runbook);
+
+    if (options.dryRun) {
+      if (options.json) {
+        console.log(JSON.stringify({ ok: true, dryRun: true, plan }, null, 2));
+      } else {
+        printRunbookPlan(plan);
+      }
+      return;
+    }
+
+    const apiBackend = await requireApiBackendForCommand(runbook, "runbook");
+    const result = await executeRunbook({
+      apiBackend,
+      runbook,
+      runbookPath,
+      continueOnError: Boolean(options.continueOnError),
+      quiet: Boolean(options.json)
+    });
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.ok) process.exitCode = 1;
+      return;
+    }
+
+    printRunbookResult(result);
+    if (!result.ok) {
+      process.exitCode = 1;
+    }
+  });
+
 addProjectSessionOptions(
   program
     .command("wait-for-idle")
@@ -3195,6 +3352,24 @@ async function createApiBackendForCommand(options = {}) {
   }
 }
 
+async function requireApiBackendForCommand(options = {}, commandName = "command") {
+  const backend = normalizeBackendChoice(options.backend || "api");
+  if (backend === "browser") {
+    throw new Error(`${commandName} requires the official Lovable API backend; --backend browser is not supported.`);
+  }
+
+  const apiBackend = await createApiBackendForCommand({
+    ...options,
+    backend: backend === "auto" ? "auto" : "api"
+  });
+  if (!apiBackend) {
+    throw new Error(
+      `${commandName} requires LOVABLE_API_KEY or LOVABLE_BEARER_TOKEN. Browser fallback is intentionally disabled for this flow.`
+    );
+  }
+  return apiBackend;
+}
+
 function getProjectIdFromUrl(targetUrl) {
   const normalizedUrl = normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL);
   const projectId = normalizedUrl.match(/\/projects\/([^/?#]+)/)?.[1] || null;
@@ -3452,6 +3627,435 @@ async function buildCodeStateFromApi({
   }
 
   return state;
+}
+
+async function executeRunbook({
+  apiBackend,
+  runbook,
+  runbookPath,
+  continueOnError = false,
+  quiet = false
+}) {
+  const startedAt = new Date().toISOString();
+  const runbookDir = path.dirname(runbookPath);
+  const outputDir = resolveRunbookOutputDir(runbook, runbookPath);
+  const projectId = getProjectIdFromTarget(runbook.projectUrl);
+  const steps = [];
+  let ok = true;
+  let lastMessageId = null;
+  let lastCommitSha = null;
+
+  await fs.mkdir(outputDir, { recursive: true });
+
+  for (let index = 0; index < runbook.steps.length; index += 1) {
+    const step = runbook.steps[index];
+    const stepStarted = Date.now();
+    const entry = {
+      index: index + 1,
+      name: step.name,
+      type: step.type,
+      ok: false,
+      durationMs: 0,
+      result: null,
+      error: null
+    };
+
+    try {
+      entry.result = await executeRunbookStep({
+        apiBackend,
+        runbook,
+        step,
+        runbookDir,
+        outputDir,
+        projectId,
+        lastMessageId,
+        lastCommitSha,
+        quiet
+      });
+      if (entry.result?.messageId) {
+        lastMessageId = entry.result.messageId;
+      }
+      if (entry.result?.commitSha) {
+        lastCommitSha = entry.result.commitSha;
+      }
+      if (entry.result?.completion?.commit_sha) {
+        lastCommitSha = entry.result.completion.commit_sha;
+      }
+      entry.ok = true;
+    } catch (err) {
+      ok = false;
+      entry.error = err?.message || String(err);
+      if (!continueOnError) {
+        entry.durationMs = Date.now() - stepStarted;
+        steps.push(entry);
+        break;
+      }
+    }
+
+    entry.durationMs = Date.now() - stepStarted;
+    steps.push(entry);
+  }
+
+  const finishedAt = new Date().toISOString();
+  return {
+    ok,
+    runbookPath,
+    projectUrl: runbook.projectUrl,
+    projectId,
+    outputDir,
+    startedAt,
+    finishedAt,
+    durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
+    steps
+  };
+}
+
+async function executeRunbookStep({
+  apiBackend,
+  runbook,
+  step,
+  runbookDir,
+  outputDir,
+  projectId,
+  lastMessageId,
+  lastCommitSha,
+  quiet
+}) {
+  if (step.type === "snapshot") {
+    const snapshot = await buildApiSnapshot(apiBackend, runbook.projectUrl, {
+      ref: step.ref,
+      maxFiles: step.maxFiles ?? runbook.defaults.maxFiles,
+      maxEdits: step.maxEdits ?? runbook.defaults.maxEdits,
+      files: step.files !== false,
+      fileContent: Boolean(step.fileContent),
+      knowledge: step.knowledge !== false,
+      edits: step.edits !== false,
+      mcp: Boolean(step.mcp)
+    });
+    const outputPath = step.output
+      ? await writeJsonFile(resolveRunbookArtifactPath(step.output, outputDir), snapshot)
+      : null;
+    return {
+      projectId: snapshot.projectId,
+      outputPath,
+      files: snapshot.files
+        ? {
+            total: snapshot.files.total,
+            returned: snapshot.files.returned,
+            truncated: snapshot.files.truncated
+          }
+        : null,
+      edits: snapshot.edits
+        ? {
+            total: snapshot.edits.total,
+            hasMore: snapshot.edits.hasMore
+          }
+        : null,
+      warnings: snapshot.warnings
+    };
+  }
+
+  if (step.type === "diff") {
+    const diffState = await buildApiDiff(apiBackend, runbook.projectUrl, {
+      messageId: step.messageId,
+      sha: step.sha || (!step.messageId && !step.latest && lastCommitSha ? lastCommitSha : null),
+      baseSha: step.baseSha,
+      latest: Boolean(step.latest) || (!step.messageId && !step.sha && !lastCommitSha)
+    });
+
+    const outputPath = step.output
+      ? await writeJsonFile(resolveRunbookArtifactPath(step.output, outputDir), diffState)
+      : null;
+    return {
+      params: diffState.params,
+      outputPath,
+      summary: diffState.summary
+    };
+  }
+
+  if (step.type === "prompt" || step.type === "fix") {
+    const promptText = await resolveRunbookPrompt(step, runbookDir);
+    const attachmentPaths = await resolveRunbookAttachments(step, runbookDir);
+    if (!hasText(promptText) && attachmentPaths.length === 0) {
+      throw new Error(`${step.type} step requires prompt/promptFile or files.`);
+    }
+
+    const parts = hasText(promptText)
+      ? buildPromptSequence(promptText, {
+          autoSplit: step.autoSplit !== false,
+          chunked: Boolean(step.chunked),
+          splitBy: step.splitBy
+        })
+      : [{
+          index: 1,
+          total: 1,
+          prompt: step.attachmentMessage || "Use the attached files as reference.",
+          rawPrompt: "",
+          attachmentOnly: true
+        }];
+    const mode = normalizePromptModeOption(step.mode || runbook.defaults.mode);
+    const sequence = [];
+    let finalResponse = null;
+
+    for (const part of parts) {
+      const isFinalPart = part.index === part.total;
+      const response = await apiBackend.submitPrompt(projectId, {
+        message: part.prompt,
+        filePaths: part.index === 1 ? attachmentPaths : [],
+        planMode: mode === "plan",
+        mode,
+        wait: isFinalPart && step.wait !== false,
+        pollInterval: step.pollMs || runbook.defaults.pollMs || DEFAULT_IDLE_POLL_MS,
+        timeout: step.timeoutMs || runbook.defaults.promptTimeoutMs || DEFAULT_IDLE_TIMEOUT_MS
+      });
+      finalResponse = response;
+      sequence.push({
+        index: part.index,
+        total: part.total,
+        chars: part.prompt.length,
+        messageId: response.message_id,
+        status: response.status,
+        completion: response.completion || null,
+        attachmentsSent: part.index === 1 ? attachmentPaths.length : 0
+      });
+    }
+
+    return {
+      messageId: finalResponse?.message_id || sequence.at(-1)?.messageId || null,
+      completion: finalResponse?.completion || null,
+      commitSha: finalResponse?.completion?.commit_sha || null,
+      mode,
+      sequence
+    };
+  }
+
+  if (step.type === "wait") {
+    const messageId = step.messageId || lastMessageId;
+    if (messageId && step.project !== true) {
+      const completion = await apiBackend.waitForMessageCompletion(projectId, messageId, {
+        pollInterval: step.pollMs || runbook.defaults.pollMs || DEFAULT_IDLE_POLL_MS,
+        timeout: step.timeoutMs || runbook.defaults.waitTimeoutMs || DEFAULT_IDLE_TIMEOUT_MS
+      });
+      return {
+        waitedFor: "message",
+        messageId,
+        completion,
+        commitSha: completion?.commit_sha || null
+      };
+    }
+
+    const project = await apiBackend.waitForProjectReady(projectId, {
+      pollInterval: step.pollMs || runbook.defaults.pollMs || DEFAULT_IDLE_POLL_MS,
+      timeout: step.timeoutMs || runbook.defaults.waitTimeoutMs || DEFAULT_IDLE_TIMEOUT_MS
+    });
+    return {
+      waitedFor: "project",
+      status: project.status || null,
+      project
+    };
+  }
+
+  if (step.type === "verify") {
+    const previewUrl = step.url || apiBackend.getPreviewUrl(projectId);
+    const routes = Array.isArray(step.routes)
+      ? step.routes
+      : (step.route ? [step.route] : ["/"]);
+    const variants = getVerifyVariants({
+      desktopOnly: Boolean(step.desktopOnly),
+      mobileOnly: Boolean(step.mobileOnly)
+    });
+    const expectText = await resolveRunbookAssertions(step, runbookDir, "expect");
+    const forbidText = await resolveRunbookAssertions(step, runbookDir, "forbid");
+    const verification = await withMutedConsole(quiet, () => runUrlVerification({
+      targetUrl: runbook.projectUrl,
+      captureUrl: previewUrl,
+      outputDir: resolveRunbookStepOutputDir(step, outputDir),
+      headless: step.headed ? false : true,
+      settleMs: step.settleMs || runbook.defaults.settleMs || 4000,
+      variants,
+      routes,
+      explicitRoutes: routes.length > 0,
+      failOnConsole: Boolean(step.failOnConsole),
+      expectText,
+      forbidText,
+      sourceLabel: step.sourceLabel || "Runbook preview",
+      throwOnBlocking: step.throwOnBlocking !== false
+    }));
+    return {
+      summaryPath: verification.summaryPath,
+      blocking: verification.summary.blocking || null,
+      captures: verification.summary.captures.length
+    };
+  }
+
+  if (step.type === "publish") {
+    const publishResult = await apiBackend.publish(projectId, {
+      visibility: step.visibility
+    });
+    const published = step.wait === false
+      ? null
+      : await apiBackend.waitForProjectPublished(projectId, {
+          pollInterval: step.pollMs || runbook.defaults.pollMs || DEFAULT_IDLE_POLL_MS,
+          timeout: step.timeoutMs || runbook.defaults.publishTimeoutMs || DEFAULT_IDLE_TIMEOUT_MS
+        });
+    const publishedUrl = await apiBackend.getPublishedUrl(projectId);
+    let verification = null;
+    if (step.verifyLive && publishedUrl) {
+      const expectText = await resolveRunbookAssertions(step, runbookDir, "expect");
+      const forbidText = await resolveRunbookAssertions(step, runbookDir, "forbid");
+      verification = await withMutedConsole(quiet, () => runUrlVerification({
+        targetUrl: runbook.projectUrl,
+        captureUrl: publishedUrl,
+        outputDir: resolveRunbookStepOutputDir(step, outputDir),
+        headless: true,
+        settleMs: step.settleMs || runbook.defaults.settleMs || 4000,
+        variants: getVerifyVariants({
+          desktopOnly: Boolean(step.desktopOnly),
+          mobileOnly: Boolean(step.mobileOnly)
+        }),
+        routes: Array.isArray(step.routes) ? step.routes : [step.route || "/"],
+        explicitRoutes: Boolean(step.route || step.routes),
+        failOnConsole: Boolean(step.failOnConsole),
+        expectText,
+        forbidText,
+        sourceLabel: "Runbook live",
+        throwOnBlocking: step.throwOnBlocking !== false
+      }));
+    }
+    return {
+      publishResult,
+      published,
+      publishedUrl,
+      liveVerificationSummaryPath: verification?.summaryPath || null,
+      blocking: verification?.summary?.blocking || null
+    };
+  }
+
+  throw new Error(`Unsupported runbook step type "${step.type}".`);
+}
+
+async function resolveRunbookPrompt(step, runbookDir) {
+  if (step.prompt && step.promptFile) {
+    throw new Error(`${step.name} passes both prompt and promptFile.`);
+  }
+  if (step.promptFile) {
+    return await fs.readFile(path.resolve(runbookDir, step.promptFile), "utf8");
+  }
+  return typeof step.prompt === "string" ? step.prompt : "";
+}
+
+async function resolveRunbookAttachments(step, runbookDir) {
+  const values = [
+    ...normalizeRunbookStringList(step.file),
+    ...normalizeRunbookStringList(step.files)
+  ];
+  return values.map((value) => path.resolve(runbookDir, value));
+}
+
+async function resolveRunbookAssertions(step, runbookDir, kind) {
+  const valueKey = kind === "expect" ? "expectText" : "forbidText";
+  const fileKey = kind === "expect" ? "expectFile" : "forbidFile";
+  const values = normalizeRunbookStringList(step[valueKey]);
+  const fileValues = normalizeRunbookStringList(step[fileKey]);
+
+  for (const fileValue of fileValues) {
+    const content = await fs.readFile(path.resolve(runbookDir, fileValue), "utf8");
+    values.push(...parseAssertionLines(content));
+  }
+
+  return values;
+}
+
+function resolveRunbookOutputDir(runbook, runbookPath) {
+  if (runbook.outputDir) {
+    return path.resolve(path.dirname(runbookPath), runbook.outputDir);
+  }
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const base = path.basename(runbookPath, path.extname(runbookPath));
+  return path.resolve(process.cwd(), "output", "runbooks", `${base}-${timestamp}`);
+}
+
+function resolveRunbookArtifactPath(value, outputDir) {
+  const target = String(value || "").trim();
+  if (!target) {
+    throw new Error("Output path cannot be empty.");
+  }
+  return path.isAbsolute(target) ? target : path.join(outputDir, target);
+}
+
+function resolveRunbookStepOutputDir(step, outputDir) {
+  if (step.outputDir) {
+    return resolveRunbookArtifactPath(step.outputDir, outputDir);
+  }
+  return path.join(outputDir, slugifyRunbookStepName(step.name));
+}
+
+function slugifyRunbookStepName(value) {
+  return String(value || "step")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    || "step";
+}
+
+function normalizeRunbookStringList(value) {
+  if (value === undefined || value === null || value === "") return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => normalizeRunbookStringList(entry));
+  }
+  return [String(value)];
+}
+
+async function withMutedConsole(quiet, fn) {
+  if (!quiet) {
+    return await fn();
+  }
+
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  try {
+    console.log = () => {};
+    console.warn = () => {};
+    return await fn();
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+  }
+}
+
+function printRunbookPlan(plan) {
+  console.log(`Runbook: ${plan.name}`);
+  console.log(`Project: ${plan.projectUrl}`);
+  console.log(`Backend: ${plan.backend}`);
+  console.log(`Output: ${plan.outputDir || "(auto)"}`);
+  console.log("");
+  console.log("Steps:");
+  for (const step of plan.steps) {
+    const marker = step.mutates ? "mutates" : "inspect";
+    console.log(`  ${step.index}. ${step.name} [${step.type}, ${marker}]`);
+  }
+}
+
+function printRunbookResult(result) {
+  console.log(`Runbook ${result.ok ? "completed" : "failed"}: ${result.runbookPath}`);
+  console.log(`Project: ${result.projectUrl}`);
+  console.log(`Output: ${result.outputDir}`);
+  console.log("");
+  for (const step of result.steps) {
+    const mark = step.ok ? "\u2713" : "\u2717";
+    console.log(`${mark} ${step.index}. ${step.name} (${step.type}, ${step.durationMs}ms)`);
+    if (!step.ok && step.error) {
+      console.log(`  Error: ${step.error}`);
+    } else if (step.result?.outputPath) {
+      console.log(`  Output: ${step.result.outputPath}`);
+    } else if (step.result?.summaryPath) {
+      console.log(`  Summary: ${step.result.summaryPath}`);
+    } else if (step.result?.publishedUrl) {
+      console.log(`  Published: ${step.result.publishedUrl}`);
+    } else if (step.result?.messageId) {
+      console.log(`  Message: ${step.result.messageId}`);
+    }
+  }
 }
 
 function collectValues(value, previous) {

@@ -45,6 +45,9 @@ Commands:
   git [options] <target-url>                       Inspect or manage the project's Git/GitHub connection.
   status [options] <target-url>                    Read dashboard metadata, git status, and preview reachability for a Lovable project.
   code [options] <target-url>                      Read the connected GitHub repository as a pragmatic Code-surface fallback.
+  snapshot [options] <target-url>                  Capture an API-backed project snapshot: project state, URLs, knowledge, files, and edit history.
+  diff [options] <target-url>                      Read an API-backed Lovable git diff for a message, commit, or latest edit.
+  runbook [options] <file>                         Run a YAML/JSON Lovable orchestration plan: snapshot, prompt, wait, verify, diff, publish.
   wait-for-idle [options] <target-url>             Wait until Lovable is idle: no Thinking state, no paused queue, no open questions, and no visible runtime error.
   speed [options] <target-url>                     Run Lighthouse against the current project preview as a pragmatic Speed-surface fallback.
   fidelity-loop [options] <target-url> [prompt]    Iteratively prompt, wait for idle, verify expectations, and send follow-up prompts for remaining gaps.
@@ -83,6 +86,9 @@ Commands:
 - [`git`](#git)
 - [`status`](#status)
 - [`code`](#code)
+- [`snapshot`](#snapshot)
+- [`diff`](#diff)
+- [`runbook`](#runbook)
 - [`wait-for-idle`](#wait-for-idle)
 - [`speed`](#speed)
 - [`fidelity-loop`](#fidelity-loop)
@@ -1028,6 +1034,80 @@ Options:
                                 api (default: "auto")
   --json                        Print machine-readable JSON (default: false)
   -h, --help                    display help for command
+```
+
+## snapshot
+
+```text
+Usage: lovagentic snapshot [options] <target-url>
+
+Capture an API-backed project snapshot: project state, URLs, knowledge, files,
+and edit history.
+
+Arguments:
+  target-url        Lovable project URL or project id
+
+Options:
+  --backend <kind>  Backend for this flow: api only (default: "api")
+  --ref <ref>       Git ref for file listing/content (defaults to latest commit
+                    or HEAD)
+  --max-files <n>   Maximum files to include in the file tree (default: 500)
+  --max-edits <n>   Maximum edits to include (default: 50)
+  --no-files        Skip project file listing
+  --file-content    Include text file contents for listed non-binary files
+                    (default: false)
+  --no-knowledge    Skip project and workspace knowledge
+  --no-edits        Skip edit history
+  --mcp             Include workspace MCP servers/connectors/catalog (default:
+                    false)
+  --output <path>   Write the full snapshot JSON to this path
+  --json            Print the full snapshot JSON (default: false)
+  -h, --help        display help for command
+```
+
+## diff
+
+```text
+Usage: lovagentic diff [options] <target-url>
+
+Read an API-backed Lovable git diff for a message, commit, or latest edit.
+
+Arguments:
+  target-url         Lovable project URL or project id
+
+Options:
+  --backend <kind>   Backend for this flow: api only (default: "api")
+  --message-id <id>  Message id to diff
+  --sha <sha>        Commit sha to diff
+  --base-sha <sha>   Optional base commit sha
+  --latest           Resolve the latest edit and diff it (default: false)
+  --output <path>    Write the full diff JSON to this path
+  --json             Print the full diff JSON (default: false)
+  -h, --help         display help for command
+```
+
+## runbook
+
+```text
+Usage: lovagentic runbook [options] <file>
+
+Run a YAML/JSON Lovable orchestration plan: snapshot, prompt, wait, verify,
+diff, publish.
+
+Arguments:
+  file                 Runbook YAML or JSON file
+
+Options:
+  --project-url <url>  Override the project URL from the runbook
+  --output-dir <path>  Override the runbook output directory
+  --backend <kind>     Backend for API-backed runbook steps: api, auto, or
+                       browser (default: "api")
+  --dry-run            Validate and print the runbook plan without executing it
+                       (default: false)
+  --continue-on-error  Continue after failed steps and report all failures
+                       (default: false)
+  --json               Print machine-readable JSON (default: false)
+  -h, --help           display help for command
 ```
 
 ## wait-for-idle

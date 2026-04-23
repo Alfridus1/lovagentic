@@ -44,8 +44,8 @@
     "generate:commands": "node ./scripts/generate-command-reference.mjs",
     "check:commands": "node ./scripts/generate-command-reference.mjs --check",
     "check:lovable-sdk": "node ./scripts/check-lovable-sdk.mjs",
-    "test": "node --test ./test/backends.test.js ./test/browser.attachments.test.js ./test/browser.idle.test.js ./test/browser.multiline.test.js ./test/dashboard.test.js ./test/init.test.js ./test/orchestration.test.js ./test/profile.test.js ./test/prompt-match.test.js ./test/publish-classify.test.js ./test/publish.test.js ./test/url.test.js ./test/version.test.js",
-    "check:syntax": "node --check ./src/browser.js && node --check ./src/cli.js && node --check ./src/config.js && node --check ./src/orchestration.js && node --check ./src/profile.js && node --check ./src/publish.js && node --check ./src/url.js && node --check ./src/backends/api-backend.js && node --check ./src/backends/browser-backend.js && node --check ./src/backends/capabilities.js && node --check ./src/backends/index.js && node --check ./src/backends/mcp-backend.js && node --check ./scripts/check-lovable-sdk.mjs && node --check ./scripts/publish-to-npm.mjs && node --check ./scripts/release.mjs",
+    "test": "node --test ./test/api-ops.test.js ./test/backends.test.js ./test/browser.attachments.test.js ./test/browser.idle.test.js ./test/browser.multiline.test.js ./test/dashboard.test.js ./test/init.test.js ./test/orchestration.test.js ./test/profile.test.js ./test/prompt-match.test.js ./test/publish-classify.test.js ./test/publish.test.js ./test/runbook.test.js ./test/url.test.js ./test/version.test.js",
+    "check:syntax": "node --check ./src/api-ops.js && node --check ./src/browser.js && node --check ./src/cli.js && node --check ./src/config.js && node --check ./src/orchestration.js && node --check ./src/profile.js && node --check ./src/publish.js && node --check ./src/runbook.js && node --check ./src/url.js && node --check ./src/backends/api-backend.js && node --check ./src/backends/browser-backend.js && node --check ./src/backends/capabilities.js && node --check ./src/backends/index.js && node --check ./src/backends/mcp-backend.js && node --check ./scripts/check-lovable-sdk.mjs && node --check ./scripts/publish-to-npm.mjs && node --check ./scripts/release.mjs",
     "check": "npm run check:syntax && npm test && npm run check:commands",
     "ci": "npm run check",
     "prerelease": "npm run generate:commands && npm run check",
@@ -59,6 +59,7 @@
   "dependencies": {
     "@lovable.dev/sdk": "^0.1.5",
     "commander": "^14.0.3",
-    "playwright": "^1.54.0"
+    "playwright": "^1.54.0",
+    "yaml": "^2.8.3"
   }
 }

@@ -1,6 +1,6 @@
 ---
 name: lovagentic
-description: "Use this repo-local skill when work should drive Lovable through the `lovagentic` project in this repository: inspect official API SDK readiness, list dashboard projects/workspaces, inspect toolbar/settings/git/code/speed/domain surfaces, create apps, send prompts, guard against truncated prompts, answer Lovable clarification cards, switch build/plan, click proposal actions, inspect runtime errors with `Try to fix`, extract security findings, verify previews, and publish Lovable projects. Prefer this skill over ad hoc browser scripting when the task targets `lovable.dev` and can be done through the CLI. Do not use it for private desktop reverse engineering or unsupported domain-purchase flows."
+description: "Use this repo-local skill when work should drive Lovable through the `lovagentic` project in this repository: inspect SDK/API readiness, list dashboard projects/workspaces, capture API snapshots/diffs, run YAML/JSON runbooks, inspect toolbar/settings/git/code/speed/domain surfaces, create apps, send prompts, guard against truncated prompts, answer Lovable clarification cards, switch build/plan, click proposal actions, inspect runtime errors with `Try to fix`, extract security findings, verify previews, and publish Lovable projects. Prefer this skill over ad hoc browser scripting when the task targets `lovable.dev` and can be done through the CLI. Do not use it for private desktop reverse engineering or unsupported domain-purchase flows."
 metadata:
   {
     "openclaw":
@@ -20,8 +20,11 @@ Use the local CLI in this repo instead of rebuilding Lovable browser flows from 
 Use this skill for:
 
 - Lovable project creation through build URLs
-- official Lovable API SDK readiness checks through `api`
+- SDK/API readiness checks through `api`
 - API-first `list`, `create`, `prompt`, `publish`, `knowledge`, `status`, and `code` through `--backend auto|api|browser`
+- API-only project snapshots through `snapshot`
+- API-only git diffs through `diff`
+- YAML/JSON orchestration through `runbook`
 - dashboard project/workspace listing through `list`
 - top-toolbar inspection through `toolbar`
 - project settings reads and safe writes through `project-settings`
@@ -91,6 +94,15 @@ npm run start -- api --json
 LOVABLE_API_KEY="lov_..." npm run start -- api --validate
 
 LOVABLE_API_KEY="lov_..." npm run start -- list --backend api --json
+
+LOVABLE_API_KEY="lov_..." npm run start -- snapshot "<project-url>" \
+  --output ./output/snapshot.json
+
+LOVABLE_API_KEY="lov_..." npm run start -- diff "<project-url>" \
+  --latest \
+  --json
+
+LOVABLE_API_KEY="lov_..." npm run start -- runbook ./runbook.yaml
 
 npm run start -- chat-loop "<project-url>" "<prompt>" \
   --mode plan \
@@ -166,6 +178,9 @@ npm run start -- publish "<project-url>" \
 - `Try to fix` lives on the runtime error surface, not in chat actions.
 - `View findings` opens an inline pane, not a modal.
 - `code` and `speed` are pragmatic fallbacks: GitHub + Lighthouse, not DOM scraping of Lovable's in-app panes.
+- Lovable's public docs currently document `Build with URL` as the first Lovable API release. Treat key-backed SDK flows as preview/availability-gated and keep browser fallback ready.
+- `snapshot`, `diff`, and `runbook` require `LOVABLE_API_KEY` or `LOVABLE_BEARER_TOKEN`; they intentionally fail closed instead of falling back to brittle DOM scraping.
+- `runbook verify` still uses Playwright screenshot capture because visual/runtime verification is not available through the SDK.
 - `wait-for-idle` uses page state, queue labels, runtime errors, and question cards; generic proposal chips do not count as build activity.
 - long prompts auto-split by default; use `--no-auto-split` only when you explicitly want a single large Lovable turn.
 - `--auto-resume` also applies during multipart prompt flows, not just `wait-for-idle` / `verify` / `speed`.

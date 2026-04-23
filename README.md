@@ -41,17 +41,22 @@ lovagentic gives your terminal (and your AI agents) full control over Lovable:
 
 ---
 
-## Multi-backend: browser, MCP, or official API
+## Multi-backend: browser, MCP, or API
 
 lovagentic v0.2 auto-selects the fastest available backend:
 
 ```
-LOVABLE_API_KEY set  →  official @lovable.dev/sdk  (fastest, no browser)
+LOVABLE_API_KEY set  →  @lovable.dev/sdk preview backend  (fastest, no browser)
 LOVABLE_MCP_URL set  →  MCP backend
 nothing set          →  Playwright browser fallback  (always works)
 ```
 
-Set an API key and most commands skip Playwright entirely:
+Lovable's public docs currently describe the Lovable API as starting with
+**Build with URL**. The key-backed SDK backend in lovagentic is intentionally
+treated as a preview path: use it when Lovable has granted API access, and keep
+the browser backend as the compatibility layer for UI-only surfaces.
+
+Set an API key and supported commands can skip Playwright:
 
 ```bash
 export LOVABLE_API_KEY=lov_your_key_here
@@ -131,7 +136,7 @@ LOVABLE_API_KEY=lov_... lovagentic runbook ./runbook.yaml
 |---|---|
 | `init` | Scaffold a project directory |
 | `doctor` | Check local environment + network |
-| `api` | Validate official SDK / API key |
+| `api` | Validate SDK/API-key readiness |
 | `login` | Authenticate with Lovable |
 | `list` | List your projects |
 | `create` | Create a new Lovable project |
@@ -178,7 +183,7 @@ Use it from Claude, GPT, Codex, or any agent that can run shell commands.
 
 | Variable | Effect |
 |---|---|
-| `LOVABLE_API_KEY` | Use official API backend (fastest) |
+| `LOVABLE_API_KEY` | Use SDK/API backend where available |
 | `LOVABLE_BEARER_TOKEN` | Alternative API auth |
 | `LOVABLE_MCP_URL` | Use MCP backend |
 | `LOVABLE_PROJECT_URL` | Default project for commands |
@@ -193,7 +198,7 @@ Full reference → [lovagentic.com/docs/reference/env](https://lovagentic.com/do
 - Node.js 20+
 - A Lovable account + session
 - Playwright Chromium (auto-installed, only needed for browser backend)
-- Optional: `LOVABLE_API_KEY` to skip the browser entirely
+- Optional: `LOVABLE_API_KEY` to use SDK-backed flows where available
 
 ---
 
@@ -202,7 +207,7 @@ Full reference → [lovagentic.com/docs/reference/env](https://lovagentic.com/do
 | Version | Status | What |
 |---|---|---|
 | **v0.1** | ✅ shipped | Browser-first CLI — Playwright control of every Lovable surface |
-| **v0.2** | ✅ shipped | Multi-backend — official API SDK + MCP + browser fallback |
+| **v0.2** | ✅ shipped | Multi-backend — SDK/API + MCP + browser fallback |
 | **v0.3** | 🔵 planned | CI/CD integrations (GitHub Actions, Vercel workflows) |
 | **v0.4** | ⚪ exploratory | Team-scale hosted control plane |
 
@@ -211,7 +216,7 @@ Full reference → [lovagentic.com/docs/reference/env](https://lovagentic.com/do
 ## Development
 
 ```bash
-npm test          # 64 tests
+npm test          # 72 tests
 npm run check     # syntax + tests
 npm run doctor    # environment check
 ```
