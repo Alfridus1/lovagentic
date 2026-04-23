@@ -21,20 +21,24 @@ mkdir -p "$OUT"
 log() { printf "\033[1;34m→\033[0m %s\n" "$*"; }
 
 log "Listing projects"
-PROJECTS="$(lovagentic list --json | jq -c '.[]')"
-COUNT="$(echo "$PROJECTS" | wc -l | tr -d ' ')"
+PROJECTS_JSON="$(lovagentic list --json)"
+COUNT="$(jq '.projects | length' <<< "$PROJECTS_JSON")"
 log "Found $COUNT projects"
-
 echo "[]" > "$OUT/index.json"
+if [[ "$COUNT" -eq 0 ]]; then
+  log "No projects found."
+  exit 0
+fi
 
-echo "$PROJECTS" | while read -r project; do
+jq -c '.projects[]' <<< "$PROJECTS_JSON" | while read -r project; do
   ID="$(echo "$project" | jq -r '.id')"
-  NAME="$(echo "$project" | jq -r '.name // .id')"
-  log "[$NAME] verifying $ID"
+  NAME="$(echo "$project" | jq -r '.title // .name // .id')"
+  URL="$(echo "$project" | jq -r '.projectUrl // ("https://lovable.dev/projects/" + .id)')"
+  log "[$NAME] verifying $URL"
 
   mkdir -p "$OUT/$ID"
   if lovagentic verify \
-      --id "$ID" \
+      "$URL" \
       --output-dir "$OUT/$ID" \
       --settle-ms 2000 \
       > "$OUT/$ID/verify.log" 2>&1; then

@@ -7,7 +7,7 @@ Copy-paste-ready recipes for common lovagentic workflows.
 | Example | What | For |
 |---|---|---|
 | [`crm-template/`](./crm-template) | Build a CRM dashboard from a single prompt, iterate, publish, verify | End-to-end demo |
-| [`github-actions-smoke-test.yml`](./github-actions-smoke-test.yml) | CI job that publishes a Lovable preview on every PR and posts a screenshot | CI/CD |
+| [`github-actions-smoke-test.yml`](./github-actions-smoke-test.yml) | CI job that verifies a Lovable preview on every PR and uploads screenshots | CI/CD |
 | [`github-actions-lighthouse.yml`](./github-actions-lighthouse.yml) | CI job that audits a Lovable preview on every PR | Performance gates |
 | [`batch-verify.sh`](./batch-verify.sh) | Shell script that loops all your Lovable projects and captures a screenshot of each | Batch ops |
 

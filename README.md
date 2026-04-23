@@ -29,7 +29,7 @@ That's it. Lovable builds. You ship.
 
 ## What it does
 
-lovagentic gives your terminal (and your AI agents) full control over Lovable:
+lovagentic gives your terminal and AI agents operator-grade control over common Lovable workflows:
 
 | | |
 |---|---|
@@ -37,18 +37,18 @@ lovagentic gives your terminal (and your AI agents) full control over Lovable:
 | 🔍 **Verify** | Screenshot every route, check for layout overflows, assert text |
 | 📦 **Publish** | One command to deploy — with live URL check |
 | 🛠 **Fix** | Inspect runtime errors, click "Try to fix", loop until clean |
-| 🤖 **Agent-ready** | `--json` output on every command. Pipe it, script it, chain it. |
+| 🤖 **Agent-ready** | JSON output on automation-focused commands. Pipe it, script it, chain it. |
 
 ---
 
-## Multi-backend: browser, MCP, or API
+## Multi-backend: API first, browser fallback
 
-lovagentic v0.2 auto-selects the fastest available backend:
+lovagentic v0.2 auto-selects the most durable available backend per command:
 
 ```
-LOVABLE_API_KEY set  →  @lovable.dev/sdk preview backend  (fastest, no browser)
-LOVABLE_MCP_URL set  →  MCP backend
-nothing set          →  Playwright browser fallback  (always works)
+LOVABLE_API_KEY set  →  @lovable.dev/sdk preview backend where supported
+Lovable session      →  Playwright browser backend for UI-only surfaces
+LOVABLE_MCP_URL set  →  reserved for a future public MCP backend
 ```
 
 Lovable's public docs currently describe the Lovable API as starting with
@@ -56,11 +56,15 @@ Lovable's public docs currently describe the Lovable API as starting with
 treated as a preview path: use it when Lovable has granted API access, and keep
 the browser backend as the compatibility layer for UI-only surfaces.
 
+The MCP transport is intentionally scaffolded, not production-active. If an MCP
+endpoint is configured today and cannot satisfy the requested capabilities,
+lovagentic falls back to the browser backend in `auto` mode.
+
 Set an API key and supported commands can skip Playwright:
 
 ```bash
 export LOVABLE_API_KEY=lov_your_key_here
-lovagentic api --validate        # confirm SDK is ready
+lovagentic api --validate        # confirm SDK/API access
 lovagentic list --json           # pure HTTPS, instant
 lovagentic prompt "..." "..."    # no browser launch
 ```
@@ -158,13 +162,13 @@ LOVABLE_API_KEY=lov_... lovagentic runbook ./runbook.yaml
 | `errors` | Inspect + click runtime errors |
 | `findings` | Read security findings |
 
-Full reference → [lovagentic.com/docs/reference/commands](https://lovagentic.com/docs/reference/commands)
+Full command reference → [docs/commands.md](./docs/commands.md)
 
 ---
 
 ## Agent-ready: pipe it, script it
 
-Every command supports `--json`:
+Most automation and read-heavy commands support `--json`:
 
 ```bash
 STATUS=$(lovagentic status "https://lovable.dev/projects/YOUR-ID" --json)
@@ -174,6 +178,9 @@ lovagentic prompt "..." "Add a pricing table" --json | jq '.effect.confirmed'
 
 lovagentic publish "..." --json | jq '.liveUrl'
 ```
+
+Commands that exist mainly to open or repair local browser state, such as
+`login` and `import-desktop-session`, stay human-facing by design.
 
 Use it from Claude, GPT, Codex, or any agent that can run shell commands.
 
@@ -185,11 +192,9 @@ Use it from Claude, GPT, Codex, or any agent that can run shell commands.
 |---|---|
 | `LOVABLE_API_KEY` | Use SDK/API backend where available |
 | `LOVABLE_BEARER_TOKEN` | Alternative API auth |
-| `LOVABLE_MCP_URL` | Use MCP backend |
+| `LOVABLE_MCP_URL` | Reserved for the planned MCP backend |
 | `LOVABLE_PROJECT_URL` | Default project for commands |
 | `LOVAGENTIC_PROFILE_DIR` | Custom browser profile path |
-
-Full reference → [lovagentic.com/docs/reference/env](https://lovagentic.com/docs/reference/env)
 
 ---
 
@@ -197,7 +202,7 @@ Full reference → [lovagentic.com/docs/reference/env](https://lovagentic.com/do
 
 - Node.js 20+
 - A Lovable account + session
-- Playwright Chromium (auto-installed, only needed for browser backend)
+- Playwright Chromium for browser-backed flows (`npx playwright install chromium`; `doctor --self-heal` can repair it)
 - Optional: `LOVABLE_API_KEY` to use SDK-backed flows where available
 
 ---
@@ -207,7 +212,7 @@ Full reference → [lovagentic.com/docs/reference/env](https://lovagentic.com/do
 | Version | Status | What |
 |---|---|---|
 | **v0.1** | ✅ shipped | Browser-first CLI — Playwright control of every Lovable surface |
-| **v0.2** | ✅ shipped | Multi-backend — SDK/API + MCP + browser fallback |
+| **v0.2** | ✅ shipped | Multi-backend — SDK/API preview + browser fallback, MCP scaffold |
 | **v0.3** | 🔵 planned | CI/CD integrations (GitHub Actions, Vercel workflows) |
 | **v0.4** | ⚪ exploratory | Team-scale hosted control plane |
 
@@ -216,7 +221,7 @@ Full reference → [lovagentic.com/docs/reference/env](https://lovagentic.com/do
 ## Development
 
 ```bash
-npm test          # 72 tests
+npm test          # regression tests
 npm run check     # syntax + tests
 npm run doctor    # environment check
 ```

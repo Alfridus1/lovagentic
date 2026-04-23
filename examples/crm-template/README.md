@@ -1,6 +1,8 @@
 # Example: Build a CRM Dashboard with lovagentic
 
-Build, iterate, and publish a full CRM dashboard from the terminal in ~90 seconds — without ever opening the Lovable web UI.
+Build, iterate, verify, audit, and publish a CRM dashboard from the terminal. With `LOVABLE_API_KEY` set, project creation can run unattended through the SDK/API preview backend; otherwise point the example at an existing project with `LOVABLE_PROJECT_URL`.
+
+Preview verification, idle waiting, and browser-only Lovable surfaces still require a logged-in Lovable browser session.
 
 ## What this example does
 
@@ -13,10 +15,14 @@ Build, iterate, and publish a full CRM dashboard from the terminal in ~90 second
 ## Run it
 
 ```bash
+export LOVABLE_API_KEY=lov_...         # optional, required only for unattended create
+# or:
+export LOVABLE_PROJECT_URL=https://lovable.dev/projects/YOUR-ID
+
 ./build.sh
 ```
 
-The script is idempotent: re-running it picks up the last-created project from `.last-project-id` and continues iterating on it instead of creating a new one.
+The script is idempotent: re-running it picks up the last-created project from `.last-project-url` and continues iterating on it instead of creating a new one.
 
 ## What's in the prompts
 
@@ -26,6 +32,6 @@ The script is idempotent: re-running it picks up the last-created project from `
 
 ## Notes
 
-- All three prompts fit comfortably under the 5k soft-limit where lovagentic auto-splits. Together they represent ~8KB of instructions.
-- The Lighthouse thresholds in `build.sh` (`--min-performance 80`, `--min-accessibility 90`) match a reasonable PR gate. Tune them for your project.
-- Swap the `--mode` flag on `chat` for `chat` (default) vs `agent` vs `plan` to taste.
+- All three prompts fit comfortably under the default auto-split thresholds; together they represent several KB of instructions.
+- The Lighthouse gate in `build.sh` is implemented with `speed --json` plus `jq`, because `speed` reports scores but does not own policy thresholds.
+- Use `chat-loop --mode build` or `chat-loop --mode plan` when you want proposal/action handling instead of simple `prompt` turns.

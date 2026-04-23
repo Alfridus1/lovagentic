@@ -18,9 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -38,14 +38,29 @@ jobs:
           printf '%s' "$LOVABLE_SESSION_ARCHIVE" | base64 -d | tar xz -C ~/.lovagentic/profile
 
       - name: Run Lighthouse
+        env:
+          LOVABLE_PROJECT_URL: ${{ vars.LOVABLE_PROJECT_URL }}
+          LOVABLE_PROJECT_ID: ${{ vars.LOVABLE_PROJECT_ID }}
         run: |
+          PROJECT_URL="${LOVABLE_PROJECT_URL:-}"
+          if [ -z "$PROJECT_URL" ]; then
+            PROJECT_URL="https://lovable.dev/projects/${LOVABLE_PROJECT_ID:?Set LOVABLE_PROJECT_URL or LOVABLE_PROJECT_ID}"
+          fi
+
+          mkdir -p ./lighthouse-reports
           lovagentic speed \
-            --id "${{ vars.LOVABLE_PROJECT_ID }}" \
+            "$PROJECT_URL" \
             --device both \
-            --min-performance 80 \
-            --min-accessibility 90 \
-            --min-best-practices 85 \
-            --output-dir ./lighthouse-reports
+            --output-dir ./lighthouse-reports \
+            --json > ./lighthouse-reports/summary.json
+
+          jq -e '
+            all(.audits[];
+              ((.scores.performance // 0) >= 80) and
+              ((.scores.accessibility // 0) >= 90) and
+              ((.scores.bestPractices // 0) >= 85)
+            )
+          ' ./lighthouse-reports/summary.json > /dev/null
 
       - name: Upload Lighthouse reports
         if: always()
