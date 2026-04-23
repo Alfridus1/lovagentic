@@ -61,6 +61,7 @@ npx playwright install chromium
 
 Read [AGENTS.md](../../AGENTS.md) first for repo-specific safety rules.
 Open [README.md](../../README.md) only when you need full command flags or examples.
+Use [docs/commands.md](../../docs/commands.md) or `npm run start -- --help` as the command source of truth; the public website docs can lag the repository.
 
 ## Session Rules
 
@@ -175,6 +176,7 @@ npm run start -- publish "<project-url>" \
 ## Important Notes
 
 - The CLI is the stable surface. Extend it before falling back to raw browser scripting.
+- Prefer repo-local docs and command help over the public website when they disagree.
 - `Try to fix` lives on the runtime error surface, not in chat actions.
 - `View findings` opens an inline pane, not a modal.
 - `code` and `speed` are pragmatic fallbacks: GitHub + Lighthouse, not DOM scraping of Lovable's in-app panes.

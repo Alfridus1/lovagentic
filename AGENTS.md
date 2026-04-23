@@ -20,7 +20,7 @@ Repo-local OpenClaw skill:
 Use these surfaces:
 
 - browser automation on Lovable's web UI
-- official `@lovable.dev/sdk` methods exposed through `src/backends/api-backend.js`
+- preview `@lovable.dev/sdk` methods exposed through `src/backends/api-backend.js`
 - persistent Playwright profiles
 - official public/live URLs for verification
 
@@ -61,6 +61,7 @@ Important:
 - `import-desktop-session` is best-effort only.
 - If Lovable or Cloudflare triggers `Verification required`, switch to a visible browser run.
 - Headless flows are practical, not guaranteed.
+- The live `lovagentic.com/docs` site can lag this repo. Treat `docs/commands.md` and `npm run start -- --help` as the source of truth until the website is redeployed.
 
 ## Repo Commands
 
@@ -167,6 +168,7 @@ For a single end-to-end proposal run:
 - Lovable SDK/API readiness detection through `api` and `doctor`
 - API-first `list`, `create`, `prompt`, `publish`, `knowledge`, `status`, and `code` when `LOVABLE_API_KEY` or `LOVABLE_BEARER_TOKEN` is configured
 - API-only `snapshot`, `diff`, and `runbook` artifacts for deterministic agent handoff and CI-style orchestration
+- generated artifacts under `output/snapshots`, `output/diffs`, and `output/runbooks`
 - dashboard project/workspace listing through the logged-in `/dashboard` page
 - prompt submission with server-side accept checks
 - local file attachments on prompt flows through Lovable's hidden chat file input

@@ -18,9 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -39,9 +39,17 @@ jobs:
           lovagentic doctor
 
       - name: Verify preview
+        env:
+          LOVABLE_PROJECT_URL: ${{ vars.LOVABLE_PROJECT_URL }}
+          LOVABLE_PROJECT_ID: ${{ vars.LOVABLE_PROJECT_ID }}
         run: |
+          PROJECT_URL="${LOVABLE_PROJECT_URL:-}"
+          if [ -z "$PROJECT_URL" ]; then
+            PROJECT_URL="https://lovable.dev/projects/${LOVABLE_PROJECT_ID:?Set LOVABLE_PROJECT_URL or LOVABLE_PROJECT_ID}"
+          fi
+
           lovagentic verify \
-            --id "${{ vars.LOVABLE_PROJECT_ID }}" \
+            "$PROJECT_URL" \
             --output-dir ./snapshots \
             --fail-on-console
 
@@ -59,5 +67,5 @@ jobs:
           message: |
             ### Lovable preview
             Screenshots attached to this run's artifacts.
-            Project: [`${{ vars.LOVABLE_PROJECT_ID }}`](https://lovable.dev/projects/${{ vars.LOVABLE_PROJECT_ID }})
+            Project: ${{ vars.LOVABLE_PROJECT_URL || format('https://lovable.dev/projects/{0}', vars.LOVABLE_PROJECT_ID) }}
           comment-tag: lovable-preview

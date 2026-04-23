@@ -33,6 +33,8 @@
   "files": [
     "src",
     "skills",
+    "docs/commands.md",
+    "docs/releases.md",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
