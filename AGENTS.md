@@ -92,10 +92,17 @@ npm run start -- chat-loop "https://lovable.dev/projects/..." "Outline the next 
 npm run start -- wait-for-idle "https://lovable.dev/projects/..."
 npm run start -- verify "https://lovable.dev/projects/..."
 npm run start -- publish "https://lovable.dev/projects/..."
+npm run start -- publish-confirm "https://lovable.dev/projects/..." --expect-text "Done"
+npm run start -- site-check "https://example.com" --discover-routes --json
+npm run start -- route-discover "https://example.com" --json
+npm run start -- update-site "https://lovable.dev/projects/..." --from ./docs/site-audit.md --publish
+npm run start -- mcp-server --stdio
+npm run start -- mcp-server --host 0.0.0.0 --port 8787
 npm run start -- publish-settings "https://lovable.dev/projects/..."
 npm run start -- domain "https://lovable.dev/projects/..."
 npm run start -- toolbar "https://lovable.dev/projects/..."
 npm run start -- project-settings "https://lovable.dev/projects/..."
+npm run start -- project-sync-status "https://lovable.dev/projects/..."
 npm run start -- git "https://lovable.dev/projects/..."
 npm run start -- code "https://lovable.dev/projects/..."
 npm run start -- speed "https://lovable.dev/projects/..."
@@ -169,6 +176,14 @@ For a single end-to-end proposal run:
 - API-first `list`, `create`, `prompt`, `publish`, `knowledge`, `status`, and `code` when `LOVABLE_API_KEY` or `LOVABLE_BEARER_TOKEN` is configured
 - API-only `snapshot`, `diff`, and `runbook` artifacts for deterministic agent handoff and CI-style orchestration
 - generated artifacts under `output/snapshots`, `output/diffs`, and `output/runbooks`
+- public-site checks through `site-check`, including title/meta/link/raw-HTML assertions, screenshots, saved HTML, console and network evidence
+- route discovery from nav/header/sidebar links through `route-discover`
+- publish confirmation through `publish-confirm`, which polls the live URL/custom domain until the expected copy is actually visible
+- standardized Lovable-site update runs through `update-site --from <audit-file>`
+- audit bundles for `site-check`, `publish-confirm`, and `update-site`, including screenshots, HTML snapshots, console/page/network evidence, prompt turns, and publish confirmation data
+- project sync inspection through `project-sync-status`
+- per-project locks for project-session commands, with `--no-project-lock` as an explicit escape hatch
+- read-only MCP connector serving repo docs, generated command reference, public GitHub issues, and releases through `mcp-server`
 - dashboard project/workspace listing through the logged-in `/dashboard` page
 - prompt submission with server-side accept checks
 - local file attachments on prompt flows through Lovable's hidden chat file input

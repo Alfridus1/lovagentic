@@ -18,6 +18,7 @@ Options:
 Commands:
   doctor [options]                                 Inspect the local Lovable desktop install, CLI profile, Node, and Playwright.
   api [options]                                    Inspect the official Lovable API SDK configuration and optionally validate the API key.
+  mcp-server [options]                             Serve a read-only MCP surface for Lovable to read lovagentic docs, commands, issues, and releases.
   init [options]                                   Scaffold a .lovagentic.json config file, prompt templates, and .env.example in the current directory.
   import-desktop-session [options]                 Copy the desktop app session files into the CLI browser profile.
   login [options]                                  Open a persistent browser profile and wait for a Lovable session.
@@ -36,10 +37,15 @@ Commands:
   findings [options] <target-url>                  Open Lovable's inline Security findings pane and extract the visible issues.
   chat-loop [options] <target-url> [prompt]        Optionally send a prompt, then list and click visible Lovable chat-side actions, and optionally verify.
   publish [options] <target-url>                   Publish a Lovable project and wait for the live URL to respond.
+  route-discover [options] <url>                   Discover same-origin routes from a site's nav/header/sidebar links.
+  site-check [options] <url>                       Check a public website for text/meta/link/html assertions, layout overflow, screenshots, and recordings.
+  publish-confirm [options] <target-url>           Publish a Lovable project, then poll the live site until assertions are visible on the public URL.
+  update-site [options] <target-url>               Send a standardized site-update prompt with reference attachments, verify preview, and optionally publish-confirm live.
   publish-settings [options] <target-url>          Inspect or update published visibility and website info.
   domain [options] <target-url>                    Inspect or update the published project domain settings.
   toolbar [options] <target-url>                   Inspect visible project toolbar buttons and optionally open their menus.
   project-settings [options] <target-url>          Inspect or update low-risk project settings like visibility, category, badge visibility, analytics, and rename.
+  project-sync-status [options] <target-url>       Inspect Git connection, latest dashboard edit, publish state, and preview/live drift.
   knowledge [options] <target-url>                 Inspect or update project and workspace knowledge.
   workspace [options] <target-url>                 Inspect workspace and account settings surfaces without mutating them.
   git [options] <target-url>                       Inspect or manage the project's Git/GitHub connection.
@@ -59,6 +65,7 @@ Commands:
 
 - [`doctor`](#doctor)
 - [`api`](#api)
+- [`mcp-server`](#mcp-server)
 - [`init`](#init)
 - [`import-desktop-session`](#import-desktop-session)
 - [`login`](#login)
@@ -77,10 +84,15 @@ Commands:
 - [`findings`](#findings)
 - [`chat-loop`](#chat-loop)
 - [`publish`](#publish)
+- [`route-discover`](#route-discover)
+- [`site-check`](#site-check)
+- [`publish-confirm`](#publish-confirm)
+- [`update-site`](#update-site)
 - [`publish-settings`](#publish-settings)
 - [`domain`](#domain)
 - [`toolbar`](#toolbar)
 - [`project-settings`](#project-settings)
+- [`project-sync-status`](#project-sync-status)
 - [`knowledge`](#knowledge)
 - [`workspace`](#workspace)
 - [`git`](#git)
@@ -126,6 +138,32 @@ Options:
                     visible workspaces (default: false)
   --json            Print machine-readable JSON (default: false)
   -h, --help        display help for command
+```
+
+## mcp-server
+
+```text
+Usage: lovagentic mcp-server [options]
+
+Serve a read-only MCP surface for Lovable to read lovagentic docs, commands,
+issues, and releases.
+
+Options:
+  --stdio                 Use stdio transport instead of Streamable HTTP
+                          (default: false)
+  --transport <kind>      Transport to use: http or stdio (default: "http")
+  --host <host>           HTTP host to bind (default: "127.0.0.1")
+  --port <port>           HTTP port to bind (default: 8787)
+  --endpoint <path>       HTTP MCP endpoint path (default: "/mcp")
+  --allowed-host <host>   Allowed HTTP Host header; repeat for hosted
+                          deployments (default: [])
+  --repo <owner/name>     GitHub repository for issue/release tools (default:
+                          "Alfridus1/lovagentic")
+  --token <token>         Require this Bearer token for HTTP MCP requests
+  --github-token <token>  GitHub token for higher issue/release API rate limits
+  --json                  Print machine-readable startup details (default:
+                          false)
+  -h, --help              display help for command
 ```
 
 ## init
@@ -288,6 +326,7 @@ Options:
                                   browser (default: false)
   --keep-open                     Leave the browser window open after prompt
                                   submission (default: false)
+  --no-project-lock               Disable the per-project lock for this run
   --mode <mode>                   Switch Lovable to build or plan before sending
   --backend <kind>                Backend for supported flows: auto, browser, or
                                   api (default: "auto")
@@ -668,6 +707,7 @@ Options:
                                   browser (default: false)
   --keep-open                     Leave the browser window open after the loop
                                   completes (default: false)
+  --no-project-lock               Disable the per-project lock for this run
   --mode <mode>                   Switch Lovable to build or plan before sending
   --action <label>                Click this visible chat-side action after the
                                   prompt (default: [])
@@ -748,6 +788,7 @@ Options:
                                 browser (default: false)
   --keep-open                   Leave the browser window open after publishing
                                 (default: false)
+  --no-project-lock             Disable the per-project lock for this run
   --backend <kind>              Backend for supported flows: auto, browser, or
                                 api (default: "auto")
   --timeout-ms <ms>             How long to wait for Lovable to finish
@@ -772,6 +813,193 @@ Options:
                                 string (default: [])
   --forbid-text <text>          Assert that live-site body text does not contain
                                 this string (default: [])
+  --expect-title <text>         Assert that live-site title contains this string
+                                (default: [])
+  --meta-description <text>     Assert that live-site description/OG/Twitter
+                                meta contains this string (default: [])
+  --expect-link <text-or-url>   Assert that a live-site link text or href
+                                contains this string (default: [])
+  --forbid-html <text>          Assert that live-site raw HTML does not contain
+                                this string (default: [])
+  --record-html                 Save captured live-site HTML next to screenshots
+                                (default: false)
+  --json                        Print machine-readable JSON (default: false)
+  -h, --help                    display help for command
+```
+
+## route-discover
+
+```text
+Usage: lovagentic route-discover [options] <url>
+
+Discover same-origin routes from a site's nav/header/sidebar links.
+
+Arguments:
+  url                Public website URL
+
+Options:
+  --headed           Run route discovery visibly (default: false)
+  --settle-ms <ms>   Extra wait before reading links (default: 2000)
+  --timeout-ms <ms>  Navigation timeout (default: 60000)
+  --max-routes <n>   Maximum routes to return (default: 100)
+  --json             Print machine-readable JSON (default: false)
+  -h, --help         display help for command
+```
+
+## site-check
+
+```text
+Usage: lovagentic site-check [options] <url>
+
+Check a public website for text/meta/link/html assertions, layout overflow,
+screenshots, and recordings.
+
+Arguments:
+  url                          Public website URL
+
+Options:
+  --route <path>               Route to check; repeat for multiple routes
+                               (default: [])
+  --discover-routes            Discover routes from nav/header/sidebar before
+                               checking (default: false)
+  --max-routes <n>             Maximum discovered routes to check (default: 30)
+  --output-dir <path>          Directory for screenshots, HTML recordings, and
+                               summary output
+  --desktop-only               Only capture desktop (default: false)
+  --mobile-only                Only capture mobile (default: false)
+  --settle-ms <ms>             Extra wait before each screenshot (default: 4000)
+  --headed                     Run browser captures visibly (default: false)
+  --fail-on-console            Treat console warnings/errors as blocking
+                               (default: false)
+  --expect-text <text>         Assert that body text contains this string
+                               (default: [])
+  --forbid-text <text>         Assert that body text does not contain this
+                               string (default: [])
+  --expect-title <text>        Assert that the page title contains this string
+                               (default: [])
+  --meta-description <text>    Assert that description/OG/Twitter meta contains
+                               this string (default: [])
+  --expect-link <text-or-url>  Assert that a link text or href contains this
+                               string (default: [])
+  --forbid-html <text>         Assert that raw page HTML does not contain this
+                               string (default: [])
+  --no-record-html             Skip saving captured HTML next to screenshots
+  --json                       Print machine-readable JSON (default: false)
+  -h, --help                   display help for command
+```
+
+## publish-confirm
+
+```text
+Usage: lovagentic publish-confirm [options] <target-url>
+
+Publish a Lovable project, then poll the live site until assertions are visible
+on the public URL.
+
+Arguments:
+  target-url                    Lovable project URL
+
+Options:
+  --profile-dir <path>          Override the CLI browser profile path
+  --seed-desktop-session        Refresh the Playwright profile from the desktop
+                                app before launch (default: false)
+  --desktop-profile-dir <path>  Override the Lovable desktop profile path
+  --headless                    Run headlessly instead of opening a visible
+                                browser (default: false)
+  --no-project-lock             Disable the per-project lock for this run
+  --publish-timeout-ms <ms>     How long to wait for Lovable to finish
+                                publishing (default: 420000)
+  --live-url-timeout-ms <ms>    How long to wait for the live site URL to return
+                                success (default: 300000)
+  --confirm-timeout-ms <ms>     How long to poll live assertions after
+                                publishing (default: 300000)
+  --poll-ms <ms>                Polling interval for publish/live confirmation
+                                (default: 5000)
+  --route <path>                Live route to confirm; repeat for multiple
+                                routes (default: [])
+  --discover-routes             Discover live routes from nav/header/sidebar
+                                before confirming (default: false)
+  --max-routes <n>              Maximum discovered routes to confirm (default:
+                                30)
+  --output-dir <path>           Directory for live confirmation artifacts
+  --desktop-only                Only capture desktop (default: false)
+  --mobile-only                 Only capture mobile (default: false)
+  --settle-ms <ms>              Extra wait before each live screenshot (default:
+                                4000)
+  --fail-on-console             Treat live-site console warnings/errors as
+                                blocking (default: false)
+  --expect-text <text>          Assert that live-site body text contains this
+                                string (default: [])
+  --forbid-text <text>          Assert that live-site body text does not contain
+                                this string (default: [])
+  --expect-title <text>         Assert that live-site title contains this string
+                                (default: [])
+  --meta-description <text>     Assert that live-site description/OG/Twitter
+                                meta contains this string (default: [])
+  --expect-link <text-or-url>   Assert that a live-site link text or href
+                                contains this string (default: [])
+  --forbid-html <text>          Assert that live-site raw HTML does not contain
+                                this string (default: [])
+  --no-record-html              Skip saving captured live-site HTML next to
+                                screenshots
+  --json                        Print machine-readable JSON (default: false)
+  -h, --help                    display help for command
+```
+
+## update-site
+
+```text
+Usage: lovagentic update-site [options] <target-url>
+
+Send a standardized site-update prompt with reference attachments, verify
+preview, and optionally publish-confirm live.
+
+Arguments:
+  target-url                    Lovable project URL
+
+Options:
+  --profile-dir <path>          Override the CLI browser profile path
+  --seed-desktop-session        Refresh the Playwright profile from the desktop
+                                app before launch (default: false)
+  --desktop-profile-dir <path>  Override the Lovable desktop profile path
+  --headless                    Run headlessly instead of opening a visible
+                                browser (default: false)
+  --no-project-lock             Disable the per-project lock for this run
+  --from <path>                 Primary site audit or instruction file to attach
+  --file <path>                 Additional reference file to attach; repeat for
+                                multiple files (default: [])
+  --prompt <text>               Override the default update prompt
+  --mode <mode>                 Lovable mode to use before sending (default:
+                                "build")
+  --route <path>                Preview/live route to verify; repeat for
+                                multiple routes (default: ["/"])
+  --output-dir <path>           Directory for preview/live artifacts
+  --settle-ms <ms>              Extra wait before each screenshot (default:
+                                4000)
+  --idle-timeout-ms <ms>        How long to wait for Lovable to become idle
+                                (default: 300000)
+  --idle-poll-ms <ms>           Polling interval while waiting for Lovable idle
+                                (default: 3000)
+  --auto-resume                 Automatically click Resume queue / Continue
+                                queue while waiting for idle (default: false)
+  --expect-text <text>          Assert preview/live body text contains this
+                                string (default: [])
+  --forbid-text <text>          Assert preview/live body text does not contain
+                                this string (default: [])
+  --expect-title <text>         Assert preview/live title contains this string
+                                (default: [])
+  --meta-description <text>     Assert preview/live description/OG/Twitter meta
+                                contains this string (default: [])
+  --expect-link <text-or-url>   Assert preview/live link text or href contains
+                                this string (default: [])
+  --forbid-html <text>          Assert preview/live raw HTML does not contain
+                                this string (default: [])
+  --publish                     Publish and confirm the live site after preview
+                                verification passes (default: false)
+  --confirm-timeout-ms <ms>     How long to poll live assertions after
+                                publishing (default: 300000)
+  --poll-ms <ms>                Polling interval for live confirmation (default:
+                                5000)
   --json                        Print machine-readable JSON (default: false)
   -h, --help                    display help for command
 ```
@@ -877,6 +1105,7 @@ Options:
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --headless                    Run headlessly instead of opening a visible
                                 browser (default: false)
+  --no-project-lock             Disable the per-project lock for this run
   --timeout-ms <ms>             How long to wait for the project settings page
                                 (default: 90000)
   --visibility <scope>          Set project visibility (public, workspace,
@@ -885,6 +1114,33 @@ Options:
   --hide-lovable-badge <state>  Set Hide Lovable badge to true/false
   --disable-analytics <state>   Set Disable analytics to true/false
   --rename <name>               Rename the project
+  --json                        Print machine-readable JSON (default: false)
+  -h, --help                    display help for command
+```
+
+## project-sync-status
+
+```text
+Usage: lovagentic project-sync-status [options] <target-url>
+
+Inspect Git connection, latest dashboard edit, publish state, and preview/live
+drift.
+
+Arguments:
+  target-url                    Lovable project URL
+
+Options:
+  --profile-dir <path>          Override the CLI browser profile path
+  --seed-desktop-session        Refresh the Playwright profile from the desktop
+                                app before launch (default: false)
+  --desktop-profile-dir <path>  Override the Lovable desktop profile path
+  --headless                    Run headlessly instead of opening a visible
+                                browser (default: false)
+  --no-project-lock             Disable the per-project lock for this run
+  --timeout-ms <ms>             How long to wait for dashboard/project surfaces
+                                (default: 60000)
+  --settle-ms <ms>              Extra wait before preview/live text probes
+                                (default: 3000)
   --json                        Print machine-readable JSON (default: false)
   -h, --help                    display help for command
 ```
@@ -906,6 +1162,7 @@ Options:
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --headless                    Run headlessly instead of opening a visible
                                 browser (default: false)
+  --no-project-lock             Disable the per-project lock for this run
   --timeout-ms <ms>             How long to wait for the knowledge settings page
                                 (default: 90000)
   --project-text <text>         Set the project knowledge text
@@ -933,6 +1190,7 @@ Options:
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --headless                    Run headlessly instead of opening a visible
                                 browser (default: false)
+  --no-project-lock             Disable the per-project lock for this run
   --section <name>              Workspace settings section to inspect (default:
                                 "all")
   --timeout-ms <ms>             How long to wait for each workspace settings
@@ -958,6 +1216,7 @@ Options:
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --headless                    Run headlessly instead of opening a visible
                                 browser (default: false)
+  --no-project-lock             Disable the per-project lock for this run
   --provider <name>             Git provider to inspect (default: "github")
   --timeout-ms <ms>             How long to wait for the git settings flow
                                 (default: 90000)
@@ -989,6 +1248,7 @@ Options:
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --headless                    Run headlessly instead of opening a visible
                                 browser (default: false)
+  --no-project-lock             Disable the per-project lock for this run
   --provider <name>             Git provider to inspect (default: "github")
   --timeout-ms <ms>             How long to wait for git and preview surfaces
                                 (default: 60000)
@@ -1021,6 +1281,7 @@ Options:
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --headless                    Run headlessly instead of opening a visible
                                 browser (default: false)
+  --no-project-lock             Disable the per-project lock for this run
   --provider <name>             Git provider to inspect before reading code
                                 (default: "github")
   --file <path>                 Read a specific file from the connected
@@ -1128,6 +1389,7 @@ Options:
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --headless                    Run headlessly instead of opening a visible
                                 browser (default: false)
+  --no-project-lock             Disable the per-project lock for this run
   --timeout-ms <ms>             How long to wait for Lovable to become idle
                                 (default: 300000)
   --poll-ms <ms>                Polling interval while waiting for Lovable to
@@ -1156,6 +1418,7 @@ Options:
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --headless                    Run headlessly instead of opening a visible
                                 browser (default: false)
+  --no-project-lock             Disable the per-project lock for this run
   --device <name>               Audit desktop, mobile, or both (default: "both")
   --output-dir <path>           Directory for Lighthouse JSON reports
   --no-wait-for-idle            Skip waiting for Lovable to become idle before
@@ -1189,6 +1452,7 @@ Options:
   --desktop-profile-dir <path>  Override the Lovable desktop profile path
   --headless                    Run headlessly instead of opening a visible
                                 browser (default: false)
+  --no-project-lock             Disable the per-project lock for this run
   --prompt-file <path>          Read the initial prompt from a local file
   --mode <mode>                 Switch Lovable to build or plan before sending
                                 prompts
@@ -1267,6 +1531,16 @@ Options:
                                 string (default: [])
   --forbid-text <text>          Assert that preview body text does not contain
                                 this string (default: [])
+  --expect-title <text>         Assert that the page title contains this string
+                                (default: [])
+  --meta-description <text>     Assert that description/OG/Twitter meta contains
+                                this string (default: [])
+  --expect-link <text-or-url>   Assert that a page link text or href contains
+                                this string (default: [])
+  --forbid-html <text>          Assert that raw page HTML does not contain this
+                                string (default: [])
+  --record-html                 Save captured HTML next to screenshots (default:
+                                false)
   --authenticated               Reuse the Lovable browser profile when capturing
                                 previews so unpublished/private routes render
                                 (defaults to anonymous) (default: false)
