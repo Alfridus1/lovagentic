@@ -25,6 +25,11 @@ Use this skill for:
 - API-only project snapshots through `snapshot`
 - API-only git diffs through `diff`
 - YAML/JSON orchestration through `runbook`
+- public website assertions, screenshots, saved HTML, link/meta checks, and route discovery through `site-check` / `route-discover`
+- publish plus live custom-domain confirmation through `publish-confirm`
+- standardized Lovable-site updates from an audit file through `update-site --from <path>`
+- project sync/drift inspection through `project-sync-status`
+- read-only MCP serving of repo docs, command reference, issues, and releases through `mcp-server`
 - dashboard project/workspace listing through `list`
 - top-toolbar inspection through `toolbar`
 - project settings reads and safe writes through `project-settings`
@@ -162,6 +167,24 @@ npm run start -- verify "<project-url>" \
 npm run start -- publish "<project-url>" \
   --profile-dir /tmp/lovagentic-task \
   --seed-desktop-session
+
+npm run start -- publish-confirm "<project-url>" \
+  --profile-dir /tmp/lovagentic-task \
+  --seed-desktop-session \
+  --expect-text "API-first where supported"
+
+npm run start -- site-check "https://lovagentic.com" \
+  --discover-routes \
+  --meta-description "Agentic CLI" \
+  --forbid-html "native MCP next week"
+
+npm run start -- update-site "<project-url>" \
+  --from ./docs/site-audit.md \
+  --publish
+
+LOVAGENTIC_MCP_TOKEN=change-me npm run start -- mcp-server \
+  --host 0.0.0.0 \
+  --port 8787
 ```
 
 ## Preferred Flow
@@ -187,4 +210,9 @@ npm run start -- publish "<project-url>" \
 - long prompts auto-split by default; use `--no-auto-split` only when you explicitly want a single large Lovable turn.
 - `--auto-resume` also applies during multipart prompt flows, not just `wait-for-idle` / `verify` / `speed`.
 - `knowledge` writes are guarded. If Lovable does not persist after reload, treat that as a product/UI limitation and fail loudly instead of pretending success.
+- Use `publish-confirm` instead of plain `publish` when the important question is whether the public custom domain actually serves the new copy.
+- Use `site-check` for public URLs. It does not need a Lovable session and records screenshots, HTML, console entries, and failed requests.
+- Treat `audit-bundle.json` from `site-check`, `publish-confirm`, and `update-site` as the preferred handoff artifact for later agents.
+- Project-session commands acquire a per-project lock by default. Only pass `--no-project-lock` for deliberate read-only parallel debugging.
+- Use `mcp-server` when Lovable should read this repo through its MCP connector. Prefer Bearer auth (`LOVAGENTIC_MCP_TOKEN`) for any hosted/public endpoint.
 - Confirm persistence after reload or navigation when a Lovable action claims success.

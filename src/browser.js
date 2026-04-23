@@ -3473,6 +3473,105 @@ export async function readUrlTextSnapshot(context, {
   }
 }
 
+export async function discoverSiteRoutes(url, {
+  headless = true,
+  timeoutMs = 60_000,
+  settleMs = 2_000,
+  maxRoutes = 100
+} = {}) {
+  const browser = await chromium.launch({
+    headless,
+    args: [
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-blink-features=AutomationControlled"
+    ]
+  });
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 900 }
+  });
+
+  try {
+    const response = await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: timeoutMs
+    });
+    await page.waitForTimeout(settleMs);
+
+    const result = await page.evaluate((limit) => {
+      const normalize = (value) => (value || "").replace(/\s+/g, " ").trim();
+      const origin = window.location.origin;
+      const currentPath = `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
+      const seen = new Set();
+      const routes = [];
+
+      const pushRoute = (href, text, source) => {
+        try {
+          const parsed = new URL(href, window.location.href);
+          if (parsed.origin !== origin) {
+            return;
+          }
+          if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+            return;
+          }
+          const route = `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
+          if (!route || seen.has(route)) {
+            return;
+          }
+          seen.add(route);
+          routes.push({
+            route,
+            href: parsed.href,
+            text: normalize(text),
+            source
+          });
+        } catch {
+          // Ignore malformed links.
+        }
+      };
+
+      pushRoute(currentPath, document.title || "current page", "current");
+
+      const scopedSelectors = [
+        ["nav a[href]", "nav"],
+        ["header a[href]", "header"],
+        ["aside a[href]", "aside"],
+        ['[role="navigation"] a[href]', "navigation"],
+        ["main a[href]", "main"]
+      ];
+
+      for (const [selector, source] of scopedSelectors) {
+        for (const link of Array.from(document.querySelectorAll(selector))) {
+          pushRoute(link.getAttribute("href") || link.href, link.innerText || link.textContent || "", source);
+          if (routes.length >= limit) {
+            return {
+              title: document.title,
+              origin,
+              routes
+            };
+          }
+        }
+      }
+
+      return {
+        title: document.title,
+        origin,
+        routes
+      };
+    }, maxRoutes);
+
+    return {
+      url,
+      finalUrl: page.url(),
+      status: response?.status() ?? null,
+      ...result
+    };
+  } finally {
+    await page.close().catch(() => {});
+    await browser.close();
+  }
+}
+
 export async function capturePreviewSnapshot({
   previewUrl,
   outputPath,
@@ -3483,6 +3582,11 @@ export async function capturePreviewSnapshot({
   headless = true,
   expectText = [],
   forbidText = [],
+  expectTitle = [],
+  expectMetaDescription = [],
+  expectLink = [],
+  forbidHtml = [],
+  htmlOutputPath = null,
   timeoutMs = 60_000,
   settleMs = 4_000,
   profileDir = null
@@ -3566,8 +3670,13 @@ export async function capturePreviewSnapshot({
 
     const snapshot = await page.evaluate((assertions) => {
       const normalize = (value) => (value || "").replace(/\s+/g, " ").trim();
+      const includesNormalized = (haystack, needle) => {
+        return normalize(haystack).toLowerCase().includes(normalize(needle).toLowerCase());
+      };
       const searchableText = normalize(document.body?.innerText || "");
       const searchableLower = searchableText.toLowerCase();
+      const html = document.documentElement?.outerHTML || "";
+      const htmlLower = html.toLowerCase();
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
       const root = document.scrollingElement || document.documentElement;
@@ -3589,6 +3698,73 @@ export async function capturePreviewSnapshot({
       const forbiddenTextsFound = assertions.forbidText.filter((value) => {
         return searchableLower.includes(normalizeNeedle(value));
       });
+      const missingExpectedTitles = assertions.expectTitle.filter((value) => {
+        return !includesNormalized(document.title, value);
+      });
+
+      const readMeta = (selector) => document.querySelector(selector)?.getAttribute("content") || "";
+      const meta = {
+        description: readMeta('meta[name="description"]'),
+        ogTitle: readMeta('meta[property="og:title"]'),
+        ogDescription: readMeta('meta[property="og:description"]'),
+        twitterTitle: readMeta('meta[name="twitter:title"]'),
+        twitterDescription: readMeta('meta[name="twitter:description"]')
+      };
+      const metaSearch = [
+        meta.description,
+        meta.ogTitle,
+        meta.ogDescription,
+        meta.twitterTitle,
+        meta.twitterDescription
+      ].join(" ");
+      const missingExpectedMetaDescriptions = assertions.expectMetaDescription.filter((value) => {
+        return !includesNormalized(metaSearch, value);
+      });
+
+      const links = Array.from(document.querySelectorAll("a[href]")).map((link) => ({
+        text: normalize(link.innerText || link.textContent || ""),
+        href: link.href,
+        pathname: (() => {
+          try {
+            return new URL(link.href).pathname || "/";
+          } catch {
+            return "";
+          }
+        })()
+      }));
+      const missingExpectedLinks = assertions.expectLink.filter((value) => {
+        const normalizedNeedle = normalizeNeedle(value);
+        return !links.some((link) => {
+          return `${link.text} ${link.href} ${link.pathname}`.toLowerCase().includes(normalizedNeedle);
+        });
+      });
+      const forbiddenHtmlFound = assertions.forbidHtml.filter((value) => {
+        return htmlLower.includes(normalizeNeedle(value));
+      });
+
+      const routeLinks = [];
+      const seenRoutes = new Set();
+      const currentOrigin = window.location.origin;
+      for (const link of links) {
+        try {
+          const url = new URL(link.href);
+          if (url.origin !== currentOrigin) {
+            continue;
+          }
+          const route = `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
+          if (seenRoutes.has(route)) {
+            continue;
+          }
+          seenRoutes.add(route);
+          routeLinks.push({
+            route,
+            text: link.text,
+            href: link.href
+          });
+        } catch {
+          // Ignore malformed hrefs in route discovery metadata.
+        }
+      }
 
       const overflowSamples = [];
       for (const element of Array.from(document.querySelectorAll("body *"))) {
@@ -3649,6 +3825,9 @@ export async function capturePreviewSnapshot({
 
       return {
         title: document.title,
+        meta,
+        links: links.slice(0, 250),
+        routeLinks: routeLinks.slice(0, 250),
         bodyText: searchableText.slice(0, 500),
         bodyTextLength: searchableText.length,
         htmlLength: document.documentElement?.outerHTML.length || 0,
@@ -3658,12 +3837,25 @@ export async function capturePreviewSnapshot({
         scrollHeight,
         layoutIssues,
         missingExpectedTexts,
-        forbiddenTextsFound
+        forbiddenTextsFound,
+        missingExpectedTitles,
+        missingExpectedMetaDescriptions,
+        missingExpectedLinks,
+        forbiddenHtmlFound
       };
     }, {
       expectText,
-      forbidText
+      forbidText,
+      expectTitle,
+      expectMetaDescription,
+      expectLink,
+      forbidHtml
     });
+
+    if (htmlOutputPath) {
+      await fs.mkdir(path.dirname(htmlOutputPath), { recursive: true });
+      await fs.writeFile(htmlOutputPath, await page.content(), "utf8");
+    }
 
     await page.screenshot({
       path: outputPath,
@@ -3675,6 +3867,7 @@ export async function capturePreviewSnapshot({
       finalUrl: page.url(),
       status: response?.status() ?? null,
       outputPath,
+      htmlOutputPath,
       snapshot,
       consoleEntries,
       pageErrors,

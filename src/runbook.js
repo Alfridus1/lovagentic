@@ -9,7 +9,11 @@ const SUPPORTED_STEP_TYPES = new Set([
   "fix",
   "wait",
   "verify",
-  "publish"
+  "publish",
+  "liveassert",
+  "metaassert",
+  "routeassert",
+  "publishconfirm"
 ]);
 
 export function parseRunbookText(text, filePath = "runbook.yaml") {
@@ -57,7 +61,8 @@ export function normalizeStep(step, index) {
     throw new Error(`Runbook step ${index + 1} must be an object.`);
   }
 
-  const type = String(step.type || step.command || "").trim().toLowerCase();
+  const rawType = String(step.type || step.command || "").trim().toLowerCase();
+  const type = canonicalizeStepType(rawType);
   if (!SUPPORTED_STEP_TYPES.has(type)) {
     throw new Error(`Runbook step ${index + 1} has unsupported type "${step.type || step.command}".`);
   }
@@ -85,7 +90,7 @@ export function getRunbookPlan(runbook) {
 }
 
 export function stepMutates(type) {
-  return ["prompt", "fix", "publish"].includes(type);
+  return ["prompt", "fix", "publish", "publishconfirm"].includes(type);
 }
 
 function normalizeBackend(value) {
@@ -94,4 +99,13 @@ function normalizeBackend(value) {
     throw new Error(`Unsupported backend "${value}". Use api, auto, or browser.`);
   }
   return normalized;
+}
+
+function canonicalizeStepType(value) {
+  const compact = String(value || "").replace(/[-_\s]/g, "");
+  if (compact === "liveassert") return "liveassert";
+  if (compact === "metaassert") return "metaassert";
+  if (compact === "routeassert") return "routeassert";
+  if (compact === "publishconfirm") return "publishconfirm";
+  return value;
 }

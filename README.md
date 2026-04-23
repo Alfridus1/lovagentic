@@ -112,7 +112,28 @@ lovagentic publish "https://lovable.dev/projects/YOUR-ID" \
 ```bash
 lovagentic verify "https://lovable.dev/projects/YOUR-ID" \
   --route / --route /docs --route /pricing \
-  --expect-text "Get started"
+  --expect-text "Get started" \
+  --meta-description "Agentic CLI"
+```
+
+**Confirm a published site is actually updated:**
+```bash
+lovagentic publish-confirm "https://lovable.dev/projects/YOUR-ID" \
+  --expect-text "API-first where supported" \
+  --forbid-html "Browser-based today, native MCP next week"
+```
+
+**Check any public site without a Lovable session:**
+```bash
+lovagentic site-check https://lovagentic.com \
+  --discover-routes \
+  --expect-link github.com/Alfridus1/lovagentic
+```
+
+**Expose repo docs to Lovable as an MCP connector:**
+```bash
+LOVAGENTIC_MCP_TOKEN=change-me lovagentic mcp-server \
+  --host 0.0.0.0 --port 8787
 ```
 
 **Run a repeatable build plan:**
@@ -141,14 +162,20 @@ LOVABLE_API_KEY=lov_... lovagentic runbook ./runbook.yaml
 | `init` | Scaffold a project directory |
 | `doctor` | Check local environment + network |
 | `api` | Validate SDK/API-key readiness |
+| `mcp-server` | Read-only MCP server for repo docs, commands, issues, releases |
 | `login` | Authenticate with Lovable |
 | `list` | List your projects |
 | `create` | Create a new Lovable project |
 | `prompt` | Send a prompt |
 | `mode` | Switch build/plan mode |
 | `wait-for-idle` | Wait until Lovable stops thinking |
-| `verify` | Screenshot routes, check text/layout |
+| `verify` | Screenshot routes; check text, title, meta, links, HTML, layout |
 | `publish` | Publish / deploy |
+| `publish-confirm` | Publish and poll live assertions until the custom domain is fresh |
+| `site-check` | Check a public site with screenshots, HTML recordings, meta/link assertions |
+| `route-discover` | Discover same-origin routes from nav/header/sidebar links |
+| `update-site` | Prompt a Lovable site update from an audit file and verify it |
+| `project-sync-status` | Inspect Git, latest edit, publish state, and preview/live drift |
 | `status` | Read project metadata |
 | `code` | Read repo files via Lovable |
 | `snapshot` | API-backed project artifact |
@@ -163,6 +190,8 @@ LOVABLE_API_KEY=lov_... lovagentic runbook ./runbook.yaml
 | `findings` | Read security findings |
 
 Full command reference → [docs/commands.md](./docs/commands.md)
+
+`site-check`, `publish-confirm`, and `update-site` write an `audit-bundle.json` next to their screenshots and HTML snapshots. The bundle keeps assertions, console/page errors, failed requests, prompt turns, and publish confirmation evidence together for agent handoff.
 
 ---
 

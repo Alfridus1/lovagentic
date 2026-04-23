@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -61,6 +62,7 @@ import {
   clickQuestionAction,
   clickRuntimeErrorAction,
   disconnectProjectGitProvider,
+  discoverSiteRoutes,
   ensureSignedIn,
   getDashboardProjectState,
   fillPrompt,
@@ -118,6 +120,9 @@ import {
   normalizeRunbook,
   parseRunbookText
 } from "./runbook.js";
+import {
+  runLovagenticMcpServer
+} from "./mcp-server.js";
 import {
   buildCreateUrl,
   buildPreviewRouteUrl,
@@ -244,7 +249,7 @@ async function runDoctorChecks({ profileDir, desktopProfileDir }) {
     { key: "lovableApiAuth", label: `Lovable API auth (${api.configured ? "configured" : "not configured"})`, ok: true, healable: false, hint: api.configured ? "Official API backend can be used for supported capabilities." : "Set LOVABLE_API_KEY=lov_... once Lovable grants API access. Browser backend remains the fallback." },
     { key: "lovableReachable", label: `lovable.dev reachable${network.lovable.ms != null ? ` (${network.lovable.ms}ms)` : ""}`, ok: network.lovable.ok, healable: false, hint: network.lovable.ok ? null : `Cannot reach https://lovable.dev (${network.lovable.error ?? "unknown error"}). Check internet connection or corporate proxy.` },
     { key: "npmReachable", label: `npm registry reachable${network.npm.ms != null ? ` (${network.npm.ms}ms)` : ""}`, ok: network.npm.ok, healable: false, hint: network.npm.ok ? null : `Cannot reach registry.npmjs.org (${network.npm.error ?? "unknown error"}). Required for self-update checks.` },
-    { key: "mcp", label: `MCP backend (${mcpConfigured ? "configured" : "not configured"})`, ok: true, healable: false, hint: mcpConfigured ? null : "LOVABLE_MCP_URL not set. Using browser backend. MCP support ships in v0.2." }
+    { key: "mcp", label: `MCP backend (${mcpConfigured ? "configured" : "not configured"})`, ok: true, healable: false, hint: mcpConfigured ? null : "LOVABLE_MCP_URL not set. Browser/API backends remain available; `mcp-server` is a separate read-only server for connectors." }
   ];
 
   return { checks, playwrightDefaultDir, api };
@@ -319,6 +324,62 @@ program
 
     if (options.validate && !result.validated) {
       process.exitCode = 1;
+    }
+  });
+
+program
+  .command("mcp-server")
+  .description("Serve a read-only MCP surface for Lovable to read lovagentic docs, commands, issues, and releases.")
+  .option("--stdio", "Use stdio transport instead of Streamable HTTP", false)
+  .option("--transport <kind>", "Transport to use: http or stdio", "http")
+  .option("--host <host>", "HTTP host to bind", "127.0.0.1")
+  .option("--port <port>", "HTTP port to bind", parseInteger, Number(process.env.PORT || 8787))
+  .option("--endpoint <path>", "HTTP MCP endpoint path", "/mcp")
+  .option("--allowed-host <host>", "Allowed HTTP Host header; repeat for hosted deployments", collectValues, [])
+  .option("--repo <owner/name>", "GitHub repository for issue/release tools", "Alfridus1/lovagentic")
+  .option("--token <token>", "Require this Bearer token for HTTP MCP requests")
+  .option("--github-token <token>", "GitHub token for higher issue/release API rate limits")
+  .option("--json", "Print machine-readable startup details", false)
+  .action(async (options) => {
+    const transport = options.stdio ? "stdio" : options.transport;
+    if (!["http", "stdio"].includes(transport)) {
+      throw new Error(`Unsupported MCP transport "${transport}". Use "http" or "stdio".`);
+    }
+
+    const server = await runLovagenticMcpServer({
+      transport,
+      host: options.host,
+      port: options.port,
+      endpoint: options.endpoint,
+      allowedHosts: options.allowedHost,
+      githubRepo: options.repo,
+      token: options.token,
+      githubToken: options.githubToken
+    });
+
+    if (transport === "stdio") {
+      return;
+    }
+
+    const payload = {
+      ok: true,
+      transport: "streamable-http",
+      url: server.url,
+      endpoint: server.endpoint,
+      host: server.host,
+      port: server.port,
+      tokenRequired: server.tokenRequired,
+      repo: options.repo
+    };
+
+    if (options.json) {
+      console.log(JSON.stringify(payload, null, 2));
+    } else {
+      console.log(`lovagentic MCP server listening at ${server.url}`);
+      console.log(`Auth: ${server.tokenRequired ? "Bearer token required" : "none"}`);
+      if (!server.tokenRequired) {
+        console.log("For hosted/public use, set LOVAGENTIC_MCP_TOKEN or pass --token and configure Bearer auth in Lovable.");
+      }
     }
   });
 
@@ -954,6 +1015,7 @@ program
   .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
   .option("--headless", "Run headlessly instead of opening a visible browser", false)
   .option("--keep-open", "Leave the browser window open after prompt submission", false)
+  .option("--no-project-lock", "Disable the per-project lock for this run")
   .option("--mode <mode>", "Switch Lovable to build or plan before sending")
   .option("--backend <kind>", "Backend for supported flows: auto, browser, or api", "auto")
   .option("--dry-run", "Print prompt size, chunking plan, and warnings without opening a browser", false)
@@ -1052,6 +1114,8 @@ program
         force: true
       });
     }
+    const normalizedUrlForLock = normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL);
+    const lock = options.projectLock === false ? null : await acquireProjectLock(normalizedUrlForLock);
     const context = await launchLovableContext({
       profileDir,
       headless: Boolean(options.headless)
@@ -1184,6 +1248,9 @@ program
     } finally {
       if (!keepOpen) {
         await context.close();
+      }
+      if (lock) {
+        await releaseProjectLock(lock);
       }
     }
   });
@@ -1761,6 +1828,7 @@ program
   .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
   .option("--headless", "Run headlessly instead of opening a visible browser", false)
   .option("--keep-open", "Leave the browser window open after the loop completes", false)
+  .option("--no-project-lock", "Disable the per-project lock for this run")
   .option("--mode <mode>", "Switch Lovable to build or plan before sending")
   .option("--action <label>", "Click this visible chat-side action after the prompt", collectValues, [])
   .option("--exact-action", "Require exact case-insensitive matching for --action labels", false)
@@ -1808,6 +1876,8 @@ program
       });
     }
 
+    const normalizedUrlForLock = normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL);
+    const lock = options.projectLock === false ? null : await acquireProjectLock(normalizedUrlForLock);
     const context = await launchLovableContext({
       profileDir,
       headless: Boolean(options.headless)
@@ -1955,6 +2025,9 @@ program
       if (!keepOpen) {
         await context.close();
       }
+      if (lock) {
+        await releaseProjectLock(lock);
+      }
     }
   });
 
@@ -1967,6 +2040,7 @@ program
   .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
   .option("--headless", "Run headlessly instead of opening a visible browser", false)
   .option("--keep-open", "Leave the browser window open after publishing", false)
+  .option("--no-project-lock", "Disable the per-project lock for this run")
   .option("--backend <kind>", "Backend for supported flows: auto, browser, or api", "auto")
   .option("--timeout-ms <ms>", "How long to wait for Lovable to finish publishing", parseInteger, 420000)
   .option("--live-url-timeout-ms <ms>", "How long to wait for the live site URL to return success", parseInteger, 300000)
@@ -1979,6 +2053,11 @@ program
   .option("--fail-on-console", "Treat live-site console warnings/errors as blocking during verify", false)
   .option("--expect-text <text>", "Assert that live-site body text contains this string", collectValues, [])
   .option("--forbid-text <text>", "Assert that live-site body text does not contain this string", collectValues, [])
+  .option("--expect-title <text>", "Assert that live-site title contains this string", collectValues, [])
+  .option("--meta-description <text>", "Assert that live-site description/OG/Twitter meta contains this string", collectValues, [])
+  .option("--expect-link <text-or-url>", "Assert that a live-site link text or href contains this string", collectValues, [])
+  .option("--forbid-html <text>", "Assert that live-site raw HTML does not contain this string", collectValues, [])
+  .option("--record-html", "Save captured live-site HTML next to screenshots", false)
   .option("--json", "Print machine-readable JSON", false)
   .action(async (targetUrl, options) => {
     const json = Boolean(options.json);
@@ -2018,6 +2097,11 @@ program
           failOnConsole: Boolean(options.failOnConsole),
           expectText: options.expectText,
           forbidText: options.forbidText,
+          expectTitle: options.expectTitle,
+          expectMetaDescription: options.metaDescription,
+          expectLink: options.expectLink,
+          forbidHtml: options.forbidHtml,
+          recordHtml: Boolean(options.recordHtml),
           sourceLabel: "API live site",
           summarySourceKey: "liveSource"
         });
@@ -2057,6 +2141,8 @@ program
       });
     }
 
+    const normalizedUrlForLock = normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL);
+    const lock = options.projectLock === false ? null : await acquireProjectLock(normalizedUrlForLock);
     const context = await launchLovableContext({
       profileDir,
       headless: Boolean(options.headless)
@@ -2122,6 +2208,11 @@ program
           failOnConsole: Boolean(options.failOnConsole),
           expectText: options.expectText,
           forbidText: options.forbidText,
+          expectTitle: options.expectTitle,
+          expectMetaDescription: options.metaDescription,
+          expectLink: options.expectLink,
+          forbidHtml: options.forbidHtml,
+          recordHtml: Boolean(options.recordHtml),
           sourceLabel: "Live site",
           summarySourceKey: "liveSource"
         });
@@ -2150,7 +2241,352 @@ program
       if (!keepOpen) {
         await context.close();
       }
+      if (lock) {
+        await releaseProjectLock(lock);
+      }
     }
+  });
+
+program
+  .command("route-discover")
+  .description("Discover same-origin routes from a site's nav/header/sidebar links.")
+  .argument("<url>", "Public website URL")
+  .option("--headed", "Run route discovery visibly", false)
+  .option("--settle-ms <ms>", "Extra wait before reading links", parseInteger, 2000)
+  .option("--timeout-ms <ms>", "Navigation timeout", parseInteger, 60_000)
+  .option("--max-routes <n>", "Maximum routes to return", parseInteger, 100)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (url, options) => {
+    const result = await discoverSiteRoutes(url, {
+      headless: !Boolean(options.headed),
+      settleMs: options.settleMs,
+      timeoutMs: options.timeoutMs,
+      maxRoutes: options.maxRoutes
+    });
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    console.log(`Route discovery: ${result.finalUrl}`);
+    console.log(`Status: ${result.status ?? "unknown"}`);
+    result.routes.forEach((route, index) => {
+      console.log(`[${index}] ${route.route}${route.text ? ` | ${route.text}` : ""} | ${route.source}`);
+    });
+  });
+
+program
+  .command("site-check")
+  .description("Check a public website for text/meta/link/html assertions, layout overflow, screenshots, and recordings.")
+  .argument("<url>", "Public website URL")
+  .option("--route <path>", "Route to check; repeat for multiple routes", collectValues, [])
+  .option("--discover-routes", "Discover routes from nav/header/sidebar before checking", false)
+  .option("--max-routes <n>", "Maximum discovered routes to check", parseInteger, 30)
+  .option("--output-dir <path>", "Directory for screenshots, HTML recordings, and summary output")
+  .option("--desktop-only", "Only capture desktop", false)
+  .option("--mobile-only", "Only capture mobile", false)
+  .option("--settle-ms <ms>", "Extra wait before each screenshot", parseInteger, 4000)
+  .option("--headed", "Run browser captures visibly", false)
+  .option("--fail-on-console", "Treat console warnings/errors as blocking", false)
+  .option("--expect-text <text>", "Assert that body text contains this string", collectValues, [])
+  .option("--forbid-text <text>", "Assert that body text does not contain this string", collectValues, [])
+  .option("--expect-title <text>", "Assert that the page title contains this string", collectValues, [])
+  .option("--meta-description <text>", "Assert that description/OG/Twitter meta contains this string", collectValues, [])
+  .option("--expect-link <text-or-url>", "Assert that a link text or href contains this string", collectValues, [])
+  .option("--forbid-html <text>", "Assert that raw page HTML does not contain this string", collectValues, [])
+  .option("--no-record-html", "Skip saving captured HTML next to screenshots")
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (url, options) => {
+    const headless = !Boolean(options.headed);
+    const outputDir = resolveSiteCheckOutputDir(url, options.outputDir);
+    let routes = getVerificationRoutes(options.route);
+    let discovered = null;
+    if (options.discoverRoutes) {
+      discovered = await discoverSiteRoutes(url, {
+        headless,
+        settleMs: Math.min(options.settleMs, 3000),
+        maxRoutes: options.maxRoutes
+      });
+      routes = discovered.routes.map((entry) => entry.route).slice(0, options.maxRoutes);
+      if (routes.length === 0) {
+        routes = ["/"];
+      }
+    }
+
+    const verification = await withMutedConsole(Boolean(options.json), () => runUrlVerification({
+      targetUrl: url,
+      captureUrl: url,
+      outputDir,
+      headless,
+      settleMs: options.settleMs,
+      variants: getVerifyVariants({
+        desktopOnly: options.desktopOnly,
+        mobileOnly: options.mobileOnly
+      }),
+      routes,
+      explicitRoutes: routes.length > 0,
+      failOnConsole: Boolean(options.failOnConsole),
+      expectText: options.expectText,
+      forbidText: options.forbidText,
+      expectTitle: options.expectTitle,
+      expectMetaDescription: options.metaDescription,
+      expectLink: options.expectLink,
+      forbidHtml: options.forbidHtml,
+      recordHtml: Boolean(options.recordHtml),
+      sourceLabel: "Site check",
+      summarySourceKey: "siteSource",
+      throwOnBlocking: false
+    }));
+
+    const auditBundlePath = await writeAuditBundle(outputDir, "audit-bundle.json", {
+      type: "site-check",
+      url,
+      discovered,
+      summaryPath: verification.summaryPath,
+      summary: verification.summary
+    });
+
+    const payload = {
+      ok: !verification.summary.blocking,
+      discovered,
+      auditBundlePath,
+      summaryPath: verification.summaryPath,
+      summary: verification.summary
+    };
+
+    if (options.json) {
+      console.log(JSON.stringify(payload, null, 2));
+    } else {
+      console.log(`Site check: ${payload.ok ? "ok" : "blocked"}`);
+      console.log(`Summary: ${verification.summaryPath}`);
+      if (verification.summary.blocking) {
+        console.log(`Blocking: ${verification.summary.blocking.reason}`);
+      }
+    }
+
+    if (verification.summary.blocking) {
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("publish-confirm")
+  .description("Publish a Lovable project, then poll the live site until assertions are visible on the public URL.")
+  .argument("<target-url>", "Lovable project URL")
+  .option("--profile-dir <path>", "Override the CLI browser profile path")
+  .option("--seed-desktop-session", "Refresh the Playwright profile from the desktop app before launch", false)
+  .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
+  .option("--headless", "Run headlessly instead of opening a visible browser", false)
+  .option("--no-project-lock", "Disable the per-project lock for this run")
+  .option("--publish-timeout-ms <ms>", "How long to wait for Lovable to finish publishing", parseInteger, 420000)
+  .option("--live-url-timeout-ms <ms>", "How long to wait for the live site URL to return success", parseInteger, 300000)
+  .option("--confirm-timeout-ms <ms>", "How long to poll live assertions after publishing", parseInteger, 300000)
+  .option("--poll-ms <ms>", "Polling interval for publish/live confirmation", parseInteger, 5000)
+  .option("--route <path>", "Live route to confirm; repeat for multiple routes", collectValues, [])
+  .option("--discover-routes", "Discover live routes from nav/header/sidebar before confirming", false)
+  .option("--max-routes <n>", "Maximum discovered routes to confirm", parseInteger, 30)
+  .option("--output-dir <path>", "Directory for live confirmation artifacts")
+  .option("--desktop-only", "Only capture desktop", false)
+  .option("--mobile-only", "Only capture mobile", false)
+  .option("--settle-ms <ms>", "Extra wait before each live screenshot", parseInteger, 4000)
+  .option("--fail-on-console", "Treat live-site console warnings/errors as blocking", false)
+  .option("--expect-text <text>", "Assert that live-site body text contains this string", collectValues, [])
+  .option("--forbid-text <text>", "Assert that live-site body text does not contain this string", collectValues, [])
+  .option("--expect-title <text>", "Assert that live-site title contains this string", collectValues, [])
+  .option("--meta-description <text>", "Assert that live-site description/OG/Twitter meta contains this string", collectValues, [])
+  .option("--expect-link <text-or-url>", "Assert that a live-site link text or href contains this string", collectValues, [])
+  .option("--forbid-html <text>", "Assert that live-site raw HTML does not contain this string", collectValues, [])
+  .option("--no-record-html", "Skip saving captured live-site HTML next to screenshots")
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
+      const publishResult = await publishProject(page, {
+        timeoutMs: options.publishTimeoutMs,
+        liveUrlTimeoutMs: options.liveUrlTimeoutMs,
+        pollMs: options.pollMs
+      });
+      if (!publishResult.liveUrl) {
+        throw new Error("Lovable publish did not expose a live URL.");
+      }
+
+      const confirm = await confirmLiveSite({
+        projectUrl: normalizedUrl,
+        liveUrl: publishResult.liveUrl,
+        options
+      });
+
+      const payload = {
+        ok: confirm.ok,
+        publish: {
+          alreadyPublished: Boolean(publishResult.alreadyPublished),
+          updatedExisting: Boolean(publishResult.updatedExisting),
+          deploymentId: publishResult.deploymentId ?? null,
+          liveUrl: publishResult.liveUrl,
+          liveCheck: publishResult.liveCheck ?? null
+        },
+        confirm
+      };
+      payload.auditBundlePath = await writeAuditBundle(confirm.outputDir, "audit-bundle.json", {
+        type: "publish-confirm",
+        projectUrl: normalizedUrl,
+        publish: payload.publish,
+        confirm
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(payload, null, 2));
+      } else {
+        console.log(`Publish: ${publishResult.updatedExisting ? "updated" : publishResult.alreadyPublished ? "already published" : "published"}`);
+        if (publishResult.deploymentId) console.log(`Deployment ID: ${publishResult.deploymentId}`);
+        console.log(`Live URL: ${publishResult.liveUrl}`);
+        console.log(`Live confirmation: ${confirm.ok ? "ok" : "blocked"}`);
+        console.log(`Summary: ${confirm.summaryPath}`);
+      }
+
+      if (!confirm.ok) {
+        process.exitCode = 1;
+      }
+    });
+  });
+
+addProjectSessionOptions(
+  program
+    .command("update-site")
+    .description("Send a standardized site-update prompt with reference attachments, verify preview, and optionally publish-confirm live.")
+    .argument("<target-url>", "Lovable project URL")
+)
+  .requiredOption("--from <path>", "Primary site audit or instruction file to attach")
+  .option("--file <path>", "Additional reference file to attach; repeat for multiple files", collectValues, [])
+  .option("--prompt <text>", "Override the default update prompt")
+  .option("--mode <mode>", "Lovable mode to use before sending", "build")
+  .option("--route <path>", "Preview/live route to verify; repeat for multiple routes", collectValues, ["/"])
+  .option("--output-dir <path>", "Directory for preview/live artifacts")
+  .option("--settle-ms <ms>", "Extra wait before each screenshot", parseInteger, 4000)
+  .option("--idle-timeout-ms <ms>", "How long to wait for Lovable to become idle", parseInteger, DEFAULT_IDLE_TIMEOUT_MS)
+  .option("--idle-poll-ms <ms>", "Polling interval while waiting for Lovable idle", parseInteger, DEFAULT_IDLE_POLL_MS)
+  .option("--auto-resume", "Automatically click Resume queue / Continue queue while waiting for idle", false)
+  .option("--expect-text <text>", "Assert preview/live body text contains this string", collectValues, [])
+  .option("--forbid-text <text>", "Assert preview/live body text does not contain this string", collectValues, [])
+  .option("--expect-title <text>", "Assert preview/live title contains this string", collectValues, [])
+  .option("--meta-description <text>", "Assert preview/live description/OG/Twitter meta contains this string", collectValues, [])
+  .option("--expect-link <text-or-url>", "Assert preview/live link text or href contains this string", collectValues, [])
+  .option("--forbid-html <text>", "Assert preview/live raw HTML does not contain this string", collectValues, [])
+  .option("--publish", "Publish and confirm the live site after preview verification passes", false)
+  .option("--confirm-timeout-ms <ms>", "How long to poll live assertions after publishing", parseInteger, 300000)
+  .option("--poll-ms <ms>", "Polling interval for live confirmation", parseInteger, 5000)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl, headless }) => {
+      const auditRoot = resolveUpdateSiteOutputDir(normalizedUrl, options.outputDir);
+      const primaryFile = path.resolve(options.from);
+      const attachmentPaths = await resolveAttachmentPaths([primaryFile, ...options.file]);
+      const defaultPrompt = [
+        "Update this website using the attached audit/instruction file as the source of truth.",
+        "Keep the existing visual design, layout, colors, CTAs, links, and component structure unless the audit explicitly asks otherwise.",
+        "Do not invent unsupported product/API/MCP features.",
+        "Only fix the listed gaps. When done, stop."
+      ].join("\n");
+      const prompt = options.prompt || defaultPrompt;
+
+      const modeResult = await ensurePromptModeReady(page, options.mode);
+      const promptSequence = await runPromptSequence(page, {
+        normalizedUrl,
+        prompt,
+        attachmentPaths,
+        autoSplit: true,
+        allowFragment: false,
+        postSubmitTimeoutMs: 60_000,
+        verificationTimeoutMs: 600_000,
+        headless,
+        questionTimeoutMs: 8_000,
+        autoResume: Boolean(options.autoResume)
+      });
+
+      const idle = await ensureProjectIdleOrThrow(page, {
+        normalizedUrl,
+        waitForIdle: true,
+        autoResume: Boolean(options.autoResume),
+        timeoutMs: options.idleTimeoutMs,
+        pollMs: options.idlePollMs,
+        contextLabel: "update-site"
+      });
+
+      const previewDir = path.join(auditRoot, "preview");
+      const preview = await withMutedConsole(Boolean(options.json), () => runPreviewVerification({
+        page,
+        normalizedUrl,
+        outputDir: previewDir,
+        headless: true,
+        settleMs: options.settleMs,
+        variants: ["desktop"],
+        routes: getVerificationRoutes(options.route),
+        explicitRoutes: true,
+        expectText: options.expectText,
+        forbidText: options.forbidText,
+        expectTitle: options.expectTitle,
+        expectMetaDescription: options.metaDescription,
+        expectLink: options.expectLink,
+        forbidHtml: options.forbidHtml,
+        recordHtml: true,
+        sourceLabel: "Update-site preview",
+        throwOnBlocking: true
+      }));
+
+      let publish = null;
+      let liveConfirm = null;
+      if (options.publish) {
+        publish = await publishProject(page, {
+          timeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
+          liveUrlTimeoutMs: options.confirmTimeoutMs,
+          pollMs: options.pollMs
+        });
+        liveConfirm = await confirmLiveSite({
+          projectUrl: normalizedUrl,
+          liveUrl: publish.liveUrl,
+          options: {
+            ...options,
+            outputDir: path.join(auditRoot, "live"),
+            recordHtml: true,
+            desktopOnly: true,
+            mobileOnly: false
+          }
+        });
+      }
+
+      const auditPayload = {
+        type: "update-site",
+        projectUrl: normalizedUrl,
+        mode: modeResult?.currentMode || options.mode,
+        prompt,
+        attachments: attachmentPaths,
+        promptSequence,
+        idle,
+        previewSummaryPath: preview.summaryPath,
+        previewSummary: preview.summary,
+        publish,
+        liveConfirm
+      };
+      const auditBundlePath = await writeAuditBundle(auditRoot, "audit-bundle.json", auditPayload);
+      const result = {
+        ...auditPayload,
+        auditBundlePath
+      };
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        printPromptSequenceLogs(promptSequence, { prefix: "Update-site" });
+        console.log(`Preview summary: ${preview.summaryPath}`);
+        if (liveConfirm) {
+          console.log(`Live confirmation: ${liveConfirm.ok ? "ok" : "blocked"} | ${liveConfirm.summaryPath}`);
+        }
+      }
+
+      if (liveConfirm && !liveConfirm.ok) {
+        process.exitCode = 1;
+      }
+    });
   });
 
 program
@@ -2400,6 +2836,121 @@ addProjectSessionOptions(
       }
 
       printProjectSettingsState(result.state);
+    });
+  });
+
+addProjectSessionOptions(
+  program
+    .command("project-sync-status")
+    .description("Inspect Git connection, latest dashboard edit, publish state, and preview/live drift.")
+    .argument("<target-url>", "Lovable project URL")
+)
+  .option("--timeout-ms <ms>", "How long to wait for dashboard/project surfaces", parseInteger, 60_000)
+  .option("--settle-ms <ms>", "Extra wait before preview/live text probes", parseInteger, 3000)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (targetUrl, options) => {
+    await withProjectPageSession(targetUrl, options, async ({ page, normalizedUrl }) => {
+      const { projectId } = getProjectIdFromUrl(normalizedUrl);
+      const dashboardPage = await page.context().newPage();
+      let dashboardState = null;
+      try {
+        dashboardState = await getDashboardProjectState(dashboardPage, {
+          projectId,
+          timeoutMs: options.timeoutMs
+        });
+      } finally {
+        await dashboardPage.close().catch(() => {});
+      }
+
+      await page.goto(normalizedUrl, { waitUntil: "domcontentloaded" });
+      const git = await getProjectGitState(page, {
+        projectUrl: normalizedUrl,
+        timeoutMs: options.timeoutMs
+      }).catch((err) => ({
+        connected: false,
+        error: err?.message || String(err)
+      }));
+
+      await page.goto(normalizedUrl, { waitUntil: "domcontentloaded" });
+      const toolbar = await getProjectToolbarState(page, {
+        projectUrl: normalizedUrl,
+        menus: ["Publish"],
+        timeoutMs: Math.min(options.timeoutMs, 30_000)
+      }).catch((err) => ({
+        error: err?.message || String(err),
+        openedMenus: []
+      }));
+
+      const publishMenu = toolbar.openedMenus?.find((entry) => /publish/i.test(entry.button?.label || ""));
+      const publishText = publishMenu?.surface?.text || "";
+      const publishLinks = publishMenu?.surface?.links || [];
+      const liveUrl = dashboardState?.project?.liveUrl ||
+        publishLinks.find((link) => /^https?:\/\//.test(link.href || ""))?.href ||
+        null;
+      const publishState = {
+        text: publishText,
+        upToDate: /Up to date/i.test(publishText),
+        updateAvailable: /\bUpdate\b/i.test(publishText) && !/Up to date/i.test(publishText),
+        published: /Published/i.test(publishText) || Boolean(liveUrl),
+        liveUrl
+      };
+
+      let drift = null;
+      try {
+        await page.goto(normalizedUrl, { waitUntil: "domcontentloaded" });
+        const previewInfo = await getProjectPreviewInfo(page);
+        const [previewProbe, liveProbe] = liveUrl
+          ? await Promise.all([
+              readUrlTextSnapshot(page.context(), { url: previewInfo.src, settleMs: options.settleMs }),
+              readUrlTextSnapshot(page.context(), { url: liveUrl, settleMs: options.settleMs })
+            ])
+          : [null, null];
+        const fingerprint = (value) => (value || "").replace(/\s+/g, " ").trim().slice(0, 240);
+        drift = {
+          previewUrl: previewInfo.src,
+          liveUrl,
+          comparable: Boolean(previewProbe && liveProbe),
+          differs: Boolean(previewProbe && liveProbe && fingerprint(previewProbe.snapshot.bodyText) !== fingerprint(liveProbe.snapshot.bodyText)),
+          previewStatus: previewProbe?.status ?? null,
+          liveStatus: liveProbe?.status ?? null,
+          previewTextLength: previewProbe?.snapshot?.bodyTextLength ?? null,
+          liveTextLength: liveProbe?.snapshot?.bodyTextLength ?? null
+        };
+      } catch (err) {
+        drift = {
+          comparable: false,
+          error: err?.message || String(err)
+        };
+      }
+
+      const result = {
+        projectUrl: normalizedUrl,
+        projectId,
+        dashboard: {
+          title: dashboardState?.project?.title || null,
+          slug: dashboardState?.project?.slug || null,
+          editCount: dashboardState?.project?.editCount ?? null,
+          lastEditedAt: dashboardState?.project?.lastEditedAt || null,
+          updatedAt: dashboardState?.project?.updatedAt || null,
+          published: dashboardState?.project?.published ?? null,
+          liveUrl: dashboardState?.project?.liveUrl || null
+        },
+        git,
+        publish: publishState,
+        drift
+      };
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(`Project: ${result.dashboard.title || projectId}`);
+      console.log(`Last edit: ${result.dashboard.lastEditedAt || "(unknown)"} | edits=${result.dashboard.editCount ?? "unknown"}`);
+      console.log(`Git connected: ${result.git.connected ? "yes" : "no"}`);
+      console.log(`Published: ${result.publish.published ? "yes" : "no"} | ${result.publish.upToDate ? "up to date" : result.publish.updateAvailable ? "update available" : "state unknown"}`);
+      console.log(`Live URL: ${result.publish.liveUrl || "(none)"}`);
+      console.log(`Live drift: ${result.drift?.comparable ? result.drift.differs ? "differs" : "same fingerprint" : "unknown"}`);
     });
   });
 
@@ -3175,6 +3726,11 @@ program
   .option("--fail-on-console", "Treat preview console warnings/errors as blocking", false)
   .option("--expect-text <text>", "Assert that preview body text contains this string", collectValues, [])
   .option("--forbid-text <text>", "Assert that preview body text does not contain this string", collectValues, [])
+  .option("--expect-title <text>", "Assert that the page title contains this string", collectValues, [])
+  .option("--meta-description <text>", "Assert that description/OG/Twitter meta contains this string", collectValues, [])
+  .option("--expect-link <text-or-url>", "Assert that a page link text or href contains this string", collectValues, [])
+  .option("--forbid-html <text>", "Assert that raw page HTML does not contain this string", collectValues, [])
+  .option("--record-html", "Save captured HTML next to screenshots", false)
   .option("--authenticated", "Reuse the Lovable browser profile when capturing previews so unpublished/private routes render (defaults to anonymous)", false)
   .option("--json", "Print machine-readable JSON with summary path and results", false)
   .action(async (targetUrl, options) => {
@@ -3240,6 +3796,11 @@ program
         failOnConsole: Boolean(options.failOnConsole),
         expectText: options.expectText,
         forbidText: options.forbidText,
+        expectTitle: options.expectTitle,
+        expectMetaDescription: options.metaDescription,
+        expectLink: options.expectLink,
+        forbidHtml: options.forbidHtml,
+        recordHtml: Boolean(options.recordHtml),
         routes: getVerificationRoutes(options.route),
         explicitRoutes: Array.isArray(options.route) && options.route.length > 0,
         sourceLabel: "Preview",
@@ -3274,7 +3835,8 @@ function addProjectSessionOptions(command) {
     .option("--profile-dir <path>", "Override the CLI browser profile path")
     .option("--seed-desktop-session", "Refresh the Playwright profile from the desktop app before launch", false)
     .option("--desktop-profile-dir <path>", "Override the Lovable desktop profile path")
-    .option("--headless", "Run headlessly instead of opening a visible browser", false);
+    .option("--headless", "Run headlessly instead of opening a visible browser", false)
+    .option("--no-project-lock", "Disable the per-project lock for this run");
 }
 
 function addBackendOption(command) {
@@ -3291,6 +3853,10 @@ async function withProjectPageSession(targetUrl, options, callback) {
     });
   }
 
+  const normalizedUrl = normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL);
+  const lock = options.projectLock === false
+    ? null
+    : await acquireProjectLock(normalizedUrl);
   const context = await launchLovableContext({
     profileDir,
     headless: Boolean(options.headless)
@@ -3298,7 +3864,6 @@ async function withProjectPageSession(targetUrl, options, callback) {
 
   try {
     const page = context.pages()[0] || await context.newPage();
-    const normalizedUrl = normalizeTargetUrl(targetUrl, DEFAULT_BASE_URL);
     await page.goto(normalizedUrl, { waitUntil: "domcontentloaded" });
 
     const hasSession = await hasLovableSession(page);
@@ -3317,6 +3882,9 @@ async function withProjectPageSession(targetUrl, options, callback) {
     });
   } finally {
     await context.close();
+    if (lock) {
+      await releaseProjectLock(lock);
+    }
   }
 }
 
@@ -3368,6 +3936,80 @@ async function requireApiBackendForCommand(options = {}, commandName = "command"
     );
   }
   return apiBackend;
+}
+
+async function acquireProjectLock(targetUrl, {
+  staleMs = 6 * 60 * 60 * 1000
+} = {}) {
+  const projectId = targetUrl.match(/\/projects\/([^/?#]+)/)?.[1] || slugifyPreviewRoute(targetUrl);
+  const lockDir = path.join(os.homedir(), ".lovagentic", "locks");
+  await fs.mkdir(lockDir, { recursive: true });
+  const lockPath = path.join(lockDir, `${projectId}.lock`);
+  const payload = {
+    projectId,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    cwd: process.cwd()
+  };
+
+  try {
+    await fs.writeFile(lockPath, JSON.stringify(payload, null, 2), {
+      flag: "wx"
+    });
+    return {
+      path: lockPath,
+      payload
+    };
+  } catch (err) {
+    if (err?.code !== "EEXIST") {
+      throw err;
+    }
+
+    const existingText = await fs.readFile(lockPath, "utf8").catch(() => "{}");
+    const existing = safeJsonParse(existingText) || {};
+    const existingPid = Number(existing.pid);
+    const startedAt = Date.parse(existing.startedAt || "");
+    const stale = !Number.isFinite(startedAt) || Date.now() - startedAt > staleMs;
+    const alive = Number.isFinite(existingPid) ? isProcessAlive(existingPid) : false;
+    if (stale || !alive) {
+      await fs.rm(lockPath, { force: true });
+      return await acquireProjectLock(targetUrl, { staleMs });
+    }
+
+    throw new Error(
+      `Project ${projectId} is already locked by pid ${existingPid} since ${existing.startedAt || "unknown"}. Use --no-project-lock only for deliberate read-only parallel runs.`
+    );
+  }
+}
+
+async function releaseProjectLock(lock) {
+  if (!lock?.path) return;
+  const existingText = await fs.readFile(lock.path, "utf8").catch(() => null);
+  const existing = existingText ? safeJsonParse(existingText) : null;
+  if (existing?.pid && existing.pid !== process.pid) {
+    return;
+  }
+  await fs.rm(lock.path, { force: true });
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeJsonParse(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function getProjectIdFromUrl(targetUrl) {
@@ -3855,7 +4497,7 @@ async function executeRunbookStep({
     };
   }
 
-  if (step.type === "verify") {
+  if (step.type === "verify" || step.type === "routeassert") {
     const previewUrl = step.url || apiBackend.getPreviewUrl(projectId);
     const routes = Array.isArray(step.routes)
       ? step.routes
@@ -3866,6 +4508,7 @@ async function executeRunbookStep({
     });
     const expectText = await resolveRunbookAssertions(step, runbookDir, "expect");
     const forbidText = await resolveRunbookAssertions(step, runbookDir, "forbid");
+    const extraAssertions = resolveRunbookPageAssertions(step);
     const verification = await withMutedConsole(quiet, () => runUrlVerification({
       targetUrl: runbook.projectUrl,
       captureUrl: previewUrl,
@@ -3878,10 +4521,51 @@ async function executeRunbookStep({
       failOnConsole: Boolean(step.failOnConsole),
       expectText,
       forbidText,
+      ...extraAssertions,
+      recordHtml: step.recordHtml !== false,
       sourceLabel: step.sourceLabel || "Runbook preview",
       throwOnBlocking: step.throwOnBlocking !== false
     }));
     return {
+      summaryPath: verification.summaryPath,
+      blocking: verification.summary.blocking || null,
+      captures: verification.summary.captures.length
+    };
+  }
+
+  if (step.type === "liveassert" || step.type === "metaassert") {
+    const publishedUrl = step.url || await apiBackend.getPublishedUrl(projectId);
+    if (!publishedUrl) {
+      throw new Error(`${step.name} requires a published URL or step.url.`);
+    }
+    const routes = Array.isArray(step.routes)
+      ? step.routes
+      : [step.route || "/"];
+    const expectText = await resolveRunbookAssertions(step, runbookDir, "expect");
+    const forbidText = await resolveRunbookAssertions(step, runbookDir, "forbid");
+    const extraAssertions = resolveRunbookPageAssertions(step);
+    const verification = await withMutedConsole(quiet, () => runUrlVerification({
+      targetUrl: runbook.projectUrl,
+      captureUrl: publishedUrl,
+      outputDir: resolveRunbookStepOutputDir(step, outputDir),
+      headless: step.headed ? false : true,
+      settleMs: step.settleMs || runbook.defaults.settleMs || 4000,
+      variants: getVerifyVariants({
+        desktopOnly: Boolean(step.desktopOnly),
+        mobileOnly: Boolean(step.mobileOnly)
+      }),
+      routes,
+      explicitRoutes: Boolean(step.route || step.routes),
+      failOnConsole: Boolean(step.failOnConsole),
+      expectText,
+      forbidText,
+      ...extraAssertions,
+      recordHtml: step.recordHtml !== false,
+      sourceLabel: step.sourceLabel || (step.type === "metaassert" ? "Runbook meta" : "Runbook live"),
+      throwOnBlocking: step.throwOnBlocking !== false
+    }));
+    return {
+      publishedUrl,
       summaryPath: verification.summaryPath,
       blocking: verification.summary.blocking || null,
       captures: verification.summary.captures.length
@@ -3903,6 +4587,7 @@ async function executeRunbookStep({
     if (step.verifyLive && publishedUrl) {
       const expectText = await resolveRunbookAssertions(step, runbookDir, "expect");
       const forbidText = await resolveRunbookAssertions(step, runbookDir, "forbid");
+      const extraAssertions = resolveRunbookPageAssertions(step);
       verification = await withMutedConsole(quiet, () => runUrlVerification({
         targetUrl: runbook.projectUrl,
         captureUrl: publishedUrl,
@@ -3918,6 +4603,8 @@ async function executeRunbookStep({
         failOnConsole: Boolean(step.failOnConsole),
         expectText,
         forbidText,
+        ...extraAssertions,
+        recordHtml: step.recordHtml !== false,
         sourceLabel: "Runbook live",
         throwOnBlocking: step.throwOnBlocking !== false
       }));
@@ -3928,6 +4615,58 @@ async function executeRunbookStep({
       publishedUrl,
       liveVerificationSummaryPath: verification?.summaryPath || null,
       blocking: verification?.summary?.blocking || null
+    };
+  }
+
+  if (step.type === "publishconfirm") {
+    const publishResult = await apiBackend.publish(projectId, {
+      visibility: step.visibility
+    });
+    const published = step.wait === false
+      ? null
+      : await apiBackend.waitForProjectPublished(projectId, {
+          pollInterval: step.pollMs || runbook.defaults.pollMs || DEFAULT_IDLE_POLL_MS,
+          timeout: step.timeoutMs || runbook.defaults.publishTimeoutMs || DEFAULT_IDLE_TIMEOUT_MS
+        });
+    const publishedUrl = step.url || await apiBackend.getPublishedUrl(projectId);
+    if (!publishedUrl) {
+      throw new Error(`${step.name} did not resolve a published URL.`);
+    }
+    const expectText = await resolveRunbookAssertions(step, runbookDir, "expect");
+    const forbidText = await resolveRunbookAssertions(step, runbookDir, "forbid");
+    const extraAssertions = resolveRunbookPageAssertions(step);
+    const confirm = await confirmLiveSite({
+      projectUrl: runbook.projectUrl,
+      liveUrl: publishedUrl,
+      options: {
+        json: quiet,
+        confirmTimeoutMs: step.confirmTimeoutMs || step.timeoutMs || runbook.defaults.publishConfirmTimeoutMs || DEFAULT_IDLE_TIMEOUT_MS,
+        pollMs: step.pollMs || runbook.defaults.pollMs || DEFAULT_IDLE_POLL_MS,
+        settleMs: step.settleMs || runbook.defaults.settleMs || 4000,
+        desktopOnly: Boolean(step.desktopOnly),
+        mobileOnly: Boolean(step.mobileOnly),
+        route: Array.isArray(step.routes) ? step.routes : [step.route || "/"],
+        discoverRoutes: Boolean(step.discoverRoutes),
+        maxRoutes: step.maxRoutes || 30,
+        outputDir: resolveRunbookStepOutputDir(step, outputDir),
+        failOnConsole: Boolean(step.failOnConsole),
+        expectText,
+        forbidText,
+        expectTitle: extraAssertions.expectTitle,
+        metaDescription: extraAssertions.expectMetaDescription,
+        expectLink: extraAssertions.expectLink,
+        forbidHtml: extraAssertions.forbidHtml,
+        recordHtml: step.recordHtml !== false
+      }
+    });
+    return {
+      publishResult,
+      published,
+      publishedUrl,
+      ok: confirm.ok,
+      attempts: confirm.attempts,
+      summaryPath: confirm.summaryPath,
+      blocking: confirm.summary?.blocking || null
     };
   }
 
@@ -3964,6 +4703,15 @@ async function resolveRunbookAssertions(step, runbookDir, kind) {
   }
 
   return values;
+}
+
+function resolveRunbookPageAssertions(step) {
+  return {
+    expectTitle: normalizeRunbookStringList(step.expectTitle),
+    expectMetaDescription: normalizeRunbookStringList(step.metaDescription || step.expectMetaDescription),
+    expectLink: normalizeRunbookStringList(step.expectLink),
+    forbidHtml: normalizeRunbookStringList(step.forbidHtml)
+  };
 }
 
 function resolveRunbookOutputDir(runbook, runbookPath) {
@@ -5750,6 +6498,22 @@ function getBlockingReason(capture, {
     return `forbidden text found: ${capture.snapshot.forbiddenTextsFound.join(", ")}`;
   }
 
+  if ((capture.snapshot.missingExpectedTitles || []).length > 0) {
+    return `missing expected title: ${capture.snapshot.missingExpectedTitles.join(", ")}`;
+  }
+
+  if ((capture.snapshot.missingExpectedMetaDescriptions || []).length > 0) {
+    return `missing expected meta description: ${capture.snapshot.missingExpectedMetaDescriptions.join(", ")}`;
+  }
+
+  if ((capture.snapshot.missingExpectedLinks || []).length > 0) {
+    return `missing expected link: ${capture.snapshot.missingExpectedLinks.join(", ")}`;
+  }
+
+  if ((capture.snapshot.forbiddenHtmlFound || []).length > 0) {
+    return `forbidden HTML found: ${capture.snapshot.forbiddenHtmlFound.join(", ")}`;
+  }
+
   if (capture.snapshot.bodyTextLength === 0) {
     return "empty body text";
   }
@@ -5773,6 +6537,11 @@ async function runPreviewVerification({
   failOnConsole = false,
   expectText = [],
   forbidText = [],
+  expectTitle = [],
+  expectMetaDescription = [],
+  expectLink = [],
+  forbidHtml = [],
+  recordHtml = false,
   sourceLabel = "Preview",
   throwOnBlocking = true,
   profileDir = null,
@@ -5791,6 +6560,11 @@ async function runPreviewVerification({
     failOnConsole,
     expectText,
     forbidText,
+    expectTitle,
+    expectMetaDescription,
+    expectLink,
+    forbidHtml,
+    recordHtml,
     sourceLabel,
     summarySourceKey: "previewSource",
     throwOnBlocking,
@@ -5810,6 +6584,11 @@ async function runUrlVerification({
   failOnConsole = false,
   expectText = [],
   forbidText = [],
+  expectTitle = [],
+  expectMetaDescription = [],
+  expectLink = [],
+  forbidHtml = [],
+  recordHtml = false,
   sourceLabel = "Preview",
   summarySourceKey = "captureSource",
   throwOnBlocking = true,
@@ -5832,7 +6611,12 @@ async function runUrlVerification({
       headless,
       failOnConsole,
       expectText,
-      forbidText
+      forbidText,
+      expectTitle,
+      expectMetaDescription,
+      expectLink,
+      forbidHtml,
+      recordHtml
     },
     captures: [],
     routes: []
@@ -5856,6 +6640,9 @@ async function runUrlVerification({
         explicitRoute: explicitRoutes
       });
       const screenshotPath = path.resolve(outputDir, screenshotFilename);
+      const htmlPath = recordHtml
+        ? path.resolve(outputDir, `${path.basename(screenshotFilename, path.extname(screenshotFilename))}.html`)
+        : null;
       const result = await capturePreviewSnapshot({
         previewUrl: captureRouteUrl,
         outputPath: screenshotPath,
@@ -5868,6 +6655,11 @@ async function runUrlVerification({
         settleMs,
         expectText,
         forbidText,
+        expectTitle,
+        expectMetaDescription,
+        expectLink,
+        forbidHtml,
+        htmlOutputPath: htmlPath,
         profileDir
       });
 
@@ -5880,6 +6672,7 @@ async function runUrlVerification({
         route,
         variant,
         screenshotPath: result.outputPath,
+        htmlPath: result.htmlOutputPath,
         status: result.status,
         finalUrl: result.finalUrl,
         consoleEntries: result.consoleEntries,
@@ -5952,6 +6745,128 @@ function resolveLiveVerifyOutputDir(targetUrl, outputDir) {
   const projectId = targetUrl.match(/\/projects\/([^/?#]+)/)?.[1] || "project";
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   return path.resolve(process.cwd(), "output", "live-verify", `${projectId}-${timestamp}`);
+}
+
+function resolveSiteCheckOutputDir(url, outputDir) {
+  if (outputDir) {
+    return path.resolve(outputDir);
+  }
+
+  let host = "site";
+  try {
+    host = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, "-");
+  } catch {
+    host = "site";
+  }
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return path.resolve(process.cwd(), "output", "site-check", `${host}-${timestamp}`);
+}
+
+function resolveUpdateSiteOutputDir(targetUrl, outputDir) {
+  if (outputDir) {
+    return path.resolve(outputDir);
+  }
+
+  const projectId = targetUrl.match(/\/projects\/([^/?#]+)/)?.[1] || "project";
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return path.resolve(process.cwd(), "output", "update-site", `${projectId}-${timestamp}`);
+}
+
+async function writeAuditBundle(outputDir, filename, payload) {
+  const bundlePath = path.resolve(outputDir, filename);
+  await fs.mkdir(path.dirname(bundlePath), { recursive: true });
+  await fs.writeFile(bundlePath, JSON.stringify({
+    createdAt: new Date().toISOString(),
+    ...payload
+  }, null, 2));
+  return bundlePath;
+}
+
+async function confirmLiveSite({
+  projectUrl,
+  liveUrl,
+  options
+}) {
+  const startedAt = Date.now();
+  const deadline = startedAt + options.confirmTimeoutMs;
+  const outputRoot = resolveLiveVerifyOutputDir(projectUrl, options.outputDir);
+  const attempts = [];
+  let routes = getVerificationRoutes(options.route);
+  let discovered = null;
+  if (options.discoverRoutes) {
+    discovered = await discoverSiteRoutes(liveUrl, {
+      headless: true,
+      settleMs: Math.min(options.settleMs, 3000),
+      maxRoutes: options.maxRoutes
+    });
+    routes = discovered.routes.map((entry) => entry.route).slice(0, options.maxRoutes);
+    if (routes.length === 0) {
+      routes = ["/"];
+    }
+  }
+
+  let lastVerification = null;
+  let attempt = 0;
+  while (Date.now() <= deadline) {
+    attempt += 1;
+    const attemptDir = path.join(outputRoot, `attempt-${attempt}`);
+    const verification = await withMutedConsole(Boolean(options.json), () => runUrlVerification({
+      targetUrl: projectUrl,
+      captureUrl: liveUrl,
+      outputDir: attemptDir,
+      headless: true,
+      settleMs: options.settleMs,
+      variants: getVerifyVariants({
+        desktopOnly: options.desktopOnly,
+        mobileOnly: options.mobileOnly
+      }),
+      routes,
+      explicitRoutes: routes.length > 0,
+      failOnConsole: Boolean(options.failOnConsole),
+      expectText: options.expectText,
+      forbidText: options.forbidText,
+      expectTitle: options.expectTitle,
+      expectMetaDescription: options.metaDescription,
+      expectLink: options.expectLink,
+      forbidHtml: options.forbidHtml,
+      recordHtml: Boolean(options.recordHtml),
+      sourceLabel: `Live confirmation ${attempt}`,
+      summarySourceKey: "liveSource",
+      throwOnBlocking: false
+    }));
+
+    lastVerification = verification;
+    attempts.push({
+      attempt,
+      elapsedMs: Date.now() - startedAt,
+      summaryPath: verification.summaryPath,
+      blocking: verification.summary.blocking || null
+    });
+
+    if (!verification.summary.blocking) {
+      return {
+        ok: true,
+        liveUrl,
+        outputDir: outputRoot,
+        discovered,
+        attempts,
+        summaryPath: verification.summaryPath,
+        summary: verification.summary
+      };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, options.pollMs));
+  }
+
+  return {
+    ok: false,
+    liveUrl,
+    outputDir: outputRoot,
+    discovered,
+    attempts,
+    summaryPath: lastVerification?.summaryPath || null,
+    summary: lastVerification?.summary || null
+  };
 }
 
 function resolveSpeedOutputDir(targetUrl, outputDir) {
