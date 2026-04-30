@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-04-30
+
+### Fixed
+
+- `doctor` correctly detects an installed auth-refresh LaunchAgent. The 0.3.4 LaunchAgent-detection helper used `os.homedir()` while `os` was not imported in `src/cli.js`. The surrounding `try/catch` swallowed the resulting `ReferenceError`, so doctor reported "not installed" on every system, regardless of whether the plist was actually present at `~/Library/LaunchAgents/com.lovagentic.auth-refresh.plist`. The check has been extracted into `src/doctor.js` (no Commander side effects) and now imports `os` correctly.
+
+### Added
+
+- `src/doctor.js` exports two pure helpers — `getDoctorLaunchAgentPlistPath()` and `isDoctorLaunchAgentInstalled()` — that the CLI imports for the doctor row. Both helpers accept `homeDir` and `stat` overrides so they can be tested without touching the real filesystem.
+- `test/doctor.test.js` regression tests pin all four soft-fail branches (file present, file is a directory, stat throws `ENOENT`, stat throws `ReferenceError`) plus the `homeDir` override path. The `ReferenceError` test specifically guards against the 0.3.4 regression returning silently.
+
 ## [0.3.4] - 2026-04-30
 
 ### Changed

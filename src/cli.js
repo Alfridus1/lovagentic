@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import { readFileSync, statSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,6 +55,7 @@ import {
   summarizeAuthState,
   writeEnvFile,
 } from "./auth.js";
+import { isDoctorLaunchAgentInstalled } from "./doctor.js";
 import {
   DEFAULT_BASE_URL,
   DEFAULT_DESKTOP_APP_PATH,
@@ -249,19 +251,7 @@ async function runDoctorChecks({ profileDir, desktopProfileDir }) {
       : authCacheUsable
         ? "auth-cache"
         : null;
-  const launchAgentInstalled = (() => {
-    try {
-      const plistPath = path.join(
-        os.homedir(),
-        "Library",
-        "LaunchAgents",
-        "com.lovagentic.auth-refresh.plist"
-      );
-      return statSync(plistPath).isFile();
-    } catch {
-      return false;
-    }
-  })();
+  const launchAgentInstalled = isDoctorLaunchAgentInstalled();
   const api = {
     configured: Boolean(apiKeyEnvSet || bearerEnvSet || authCacheUsable),
     apiKeyConfigured: apiKeyEnvSet,
