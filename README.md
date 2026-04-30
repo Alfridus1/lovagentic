@@ -227,15 +227,19 @@ Full reference → [lovagentic.com/docs/reference/env](https://lovagentic.com/do
 |---|---|---|
 | **v0.1** | ✅ shipped | Browser-first CLI — Playwright control of every Lovable surface |
 | **v0.2** | ✅ shipped | Multi-backend — SDK/API + MCP + browser fallback |
-| **v0.3** | 🔵 planned | CI/CD integrations (GitHub Actions, Vercel workflows) |
-| **v0.4** | ⚪ exploratory | Team-scale hosted control plane |
+| **v0.3** | ✅ shipped | Firebase bearer-token bootstrap, refresh, persistent cache; full Lovable API reference docs; runbook output persistence; `getProject` enrichment workaround |
+| **v0.4** | 🔵 planned | CI/CD integrations (GitHub Actions, Vercel workflows) |
+| **v0.5** | ⚪ exploratory | Team-scale hosted control plane |
+
+Long-form upstream proposals (e.g. `@lovable.dev/sdk` enhancements) live in
+[`proposals/`](./proposals).
 
 ---
 
 ## Development
 
 ```bash
-npm test          # 72 tests
+npm test          # 78 tests
 npm run check     # syntax + tests
 npm run doctor    # environment check
 ```

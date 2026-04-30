@@ -477,7 +477,9 @@ Highlights:
 - `GET /v1/projects/{pid}/git/diff` top-level uses `diffs`, not `entries`.
   Items use `{action, file_path, file_type, is_image, hunks}` and hunks use
   camelCase (`oldStart`/`newStart`).
-- `GET /v1/projects/{pid}/database` returns just `{ enabled: bool }`.
+- `GET /v1/projects/{pid}/database` returns `{ enabled: false }` when the
+  project has no Lovable Cloud DB and `{ enabled: true, stack: "supabase" }`
+  when it does. `supabase` is the only `stack` value seen in production.
 - `GET /v1/workspaces/{wsId}` wraps the workspace as
   `{ workspace, current_member }`.
 - `POST /v1/projects/{pid}/messages` returns `{message_id, status:

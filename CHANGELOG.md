@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-04-30
+
+### Added
+
+- New `proposals/` directory for upstream PR-ready design documents. First entry: [`proposals/lovable-sdk-getproject-enrichment.md`](./proposals/lovable-sdk-getproject-enrichment.md), a complete drop-in proposal for `@lovable.dev/sdk` adding `client.getProject(id, { enrich: true })` with the same workaround `lovagentic` ships internally. Includes real-world repro using a published Lovable project, reference implementation, TypeScript signatures, and a bundle of side documentation drift corrections.
+
+### Changed
+
+- `docs/lovable-api-reference.md` and `docs/lovable-api.md` updated for the `GET /v1/projects/{pid}/database` endpoint. Recon across 55 projects in 4 workspaces confirms two distinct shapes: `{ enabled: false }` when the project has no Lovable Cloud DB, and `{ enabled: true, stack: "supabase" }` when it does. The `stack` field was missing from earlier drafts; the only value observed in production is `"supabase"`. The TypeScript reference type was also corrected.
+
 ## [0.3.2] - 2026-04-30
 
 ### Added

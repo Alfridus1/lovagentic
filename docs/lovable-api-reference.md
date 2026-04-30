@@ -744,19 +744,32 @@ on plans that include backend hosting.
 
 ### `GET /v1/projects/{pid}/database`
 
-**Real wire shape** is just `{ enabled: bool }`:
+**Real wire shape** depends on whether the project DB is enabled:
 
 ```jsonc
+// When the project does NOT have a Lovable Cloud database
 {
   "$schema": "https://api.lovable.dev/V1GetDatabaseStatusOutputBody.json",
-  "enabled": true
+  "enabled": false
+}
+
+// When the project DOES have one
+{
+  "$schema": "https://api.lovable.dev/V1GetDatabaseStatusOutputBody.json",
+  "enabled": true,
+  "stack":   "supabase"
 }
 ```
 
-When the database is enabled, call `connection-info` for credentials and the
-`/database/query` endpoint to introspect tables. The richer shape
-(`status`, `region`, `size_bytes`, `tables`) shown in earlier drafts of these
-docs reflects the SDK type, not the live wire response.
+`stack` is only set when `enabled: true` and identifies the DB engine
+Lovable provisioned. The only value we have observed in production is
+`"supabase"` (sampled across 55 projects, 4 workspaces, 2026-04-30).
+
+When `enabled: true`, call `/database/connection-info` for credentials and
+`/database/query` to introspect tables. The richer shape (`status`,
+`region`, `size_bytes`, `tables`) shown in earlier drafts of these docs
+reflects the SDK type, not the live wire response — those fields are not
+returned by the public API today.
 
 ### `POST /v1/projects/{pid}/database/enable`
 
@@ -1349,7 +1362,12 @@ interface FileUploadUrlResponse {
   expires_in: number;
 }
 
-interface DatabaseStatus { is_enabled: boolean; status: string; region?: string; size_bytes?: number; tables?: number; }
+// Real wire shape (verified 2026-04-30):
+//   { enabled: false }
+//   { enabled: true, stack: "supabase" }
+// The SDK's typed `DatabaseStatus` adds is_enabled/status/region/size_bytes/tables,
+// but those fields are not returned by api.lovable.dev today.
+interface DatabaseStatus { enabled: boolean; stack?: "supabase" | string; }
 interface DatabaseQueryResult { columns: string[]; rows: unknown[][]; row_count: number; duration_ms: number; }
 interface DatabaseConnectionInfo {
   host: string;
@@ -1648,12 +1666,17 @@ Note: hunk fields are camelCase (`oldStart`, `newStart`), and lines use
 ### `GET /v1/projects/{pid}/database` real shape
 
 ```jsonc
+// disabled
 { "$schema": "…", "enabled": false }
+// enabled
+{ "$schema": "…", "enabled": true, "stack": "supabase" }
 ```
 
-Not `is_enabled`/`status`/`region`/`size_bytes`. When the database is enabled,
-Lovable currently still returns just `{ "enabled": true }` from this endpoint;
-run `GET /v1/projects/{pid}/database/connection-info` for credentials and the
+Not `is_enabled`/`status`/`region`/`size_bytes`. The `stack` field is only
+present when `enabled: true`. We sampled 55 projects across 4 workspaces on
+2026-04-30 and the only `stack` value observed was `"supabase"` — there is
+likely a single supported stack today. Run
+`GET /v1/projects/{pid}/database/connection-info` for credentials and the
 `/database/query` endpoint to introspect tables.
 
 ### `GET /v1/workspaces/{wsId}` wraps the workspace
