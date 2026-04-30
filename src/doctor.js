@@ -38,3 +38,19 @@ export function isDoctorLaunchAgentInstalled({
     return false;
   }
 }
+
+/**
+ * Return the keys of `doctor` checks that `--self-heal` should attempt to
+ * repair. A check participates whenever `healable: true`, regardless of its
+ * `ok` flag, because some healable checks are advisory (e.g. "LaunchAgent
+ * not installed") and report `ok: true` to keep the overall exit status
+ * green for users who do not want the optional heal.
+ *
+ * Pure function. Used both by `selfHealDoctor` (to drive the heal loop)
+ * and by tests to pin the contract.
+ */
+export function selfHealActionKeysFor(checks = []) {
+  return checks
+    .filter((c) => c && c.healable === true)
+    .map((c) => c.key);
+}

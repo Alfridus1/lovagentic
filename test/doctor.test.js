@@ -88,3 +88,38 @@ test("isDoctorLaunchAgentInstalled honours a caller-supplied homeDir", () => {
     `expected stat path to start with /Users/other/, got ${calledWith}`
   );
 });
+
+// ---- self-heal contract ----
+//
+// `lovagentic doctor --self-heal` must trigger heal actions even for checks
+// that report `ok: true` so long as they expose `healable: true`. This is
+// the contract that powers the auth-bootstrap and LaunchAgent-install heal
+// branches. Pinning it stops the next refactor from quietly re-adding the
+// `!c.ok && c.healable` guard that was wrong in the first cut.
+import { selfHealActionKeysFor } from "../src/doctor.js";
+
+test("selfHealActionKeysFor selects healable checks regardless of ok status", () => {
+  const checks = [
+    { key: "node",                ok: true,  healable: false },
+    { key: "chromium",            ok: false, healable: true },
+    { key: "cliProfile",          ok: false, healable: true },
+    { key: "lovableApiAuth",      ok: true,  healable: true },
+    { key: "lovableAuthRefresh",  ok: true,  healable: true },
+    { key: "lovableReachable",    ok: false, healable: false },
+  ];
+  const keys = selfHealActionKeysFor(checks);
+  assert.deepEqual(keys.sort(), [
+    "chromium",
+    "cliProfile",
+    "lovableApiAuth",
+    "lovableAuthRefresh",
+  ]);
+});
+
+test("selfHealActionKeysFor skips checks that are not healable, even when broken", () => {
+  const checks = [
+    { key: "lovableReachable", ok: false, healable: false },
+    { key: "npmReachable",     ok: false, healable: false },
+  ];
+  assert.deepEqual(selfHealActionKeysFor(checks), []);
+});

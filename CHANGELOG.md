@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-04-30
+
+### Added
+
+- `lovagentic doctor --self-heal` now repairs the Lovable API auth setup, not just the browser dependencies. Two new heal branches:
+  - **`auth_bootstrap`**: when no env credentials are set and no refresh token is cached but the Lovable Desktop app has a valid session, the heal step runs `auth bootstrap` headlessly against the seeded profile and persists `~/.lovagentic/auth.json` (mode 0600).
+  - **`install_launch_agent`**: on macOS, runs `scripts/launchd/install-auth-refresh.sh` from the package directory to install `~/Library/LaunchAgents/com.lovagentic.auth-refresh.plist`. Resolves the script via `import.meta.url` so it works for `npm i -g`, `npm link`, and direct repo runs. On non-macOS, prints a hint pointing at cron / systemd instead of failing.
+- `selfHealActionKeysFor(checks)` exported from `src/doctor.js` formalises the contract: any check with `healable: true` is a self-heal target, regardless of its `ok` flag. This unblocks heal branches for advisory checks (the LaunchAgent is optional, the Lovable API auth has the browser fallback) that previously kept the overall exit status green and so were never picked up by the `!c.ok` filter.
+- `test/doctor.test.js` regression tests pin both the `healable`-only selection and the explicit skip-when-not-healable contract (8 tests in this file now).
+
+### Changed
+
+- The `lovableApiAuth` and `lovableAuthRefresh` doctor rows now expose `healable: true` whenever a heal step would actually do something (a desktop session is available for bootstrap; macOS for the LaunchAgent). Their hints point at `lovagentic doctor --self-heal` first, with the manual `auth bootstrap` / `scripts/launchd/install-auth-refresh.sh` fallbacks listed second.
+
 ## [0.3.5] - 2026-04-30
 
 ### Fixed

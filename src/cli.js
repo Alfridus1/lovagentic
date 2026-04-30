@@ -291,12 +291,15 @@ async function runDoctorChecks({ profileDir, desktopProfileDir }) {
           })`
         : "Lovable API auth (not configured)",
       ok: true,
-      healable: false,
+      healable: !api.configured && desktopCookieFileExists,
+      meta: { api, profileDir, desktopProfileDir },
       hint: api.configured
         ? api.authSource === "auth-cache"
           ? `Using cached refresh-token at ${api.authFile}. Run \`lovagentic auth refresh\` to mint a new bearer; install the LaunchAgent (scripts/launchd/install-auth-refresh.sh) for hands-off rotation.`
           : "Official API backend is ready (env credentials)."
-        : "No Lovable API auth available. Set LOVABLE_API_KEY=lov_... or run `lovagentic auth bootstrap` after signing in to Lovable Desktop."
+        : desktopCookieFileExists
+          ? "No Lovable API auth available. Run `lovagentic auth bootstrap` (or `lovagentic doctor --self-heal`) to capture the refresh token from your logged-in desktop session."
+          : "No Lovable API auth available. Sign in to Lovable.app first, then run `lovagentic auth bootstrap`."
     },
     {
       key: "lovableAuthRefresh",
@@ -304,10 +307,13 @@ async function runDoctorChecks({ profileDir, desktopProfileDir }) {
         ? "Lovable auth refresh agent (installed)"
         : "Lovable auth refresh agent (not installed)",
       ok: true,
-      healable: false,
+      healable: !api.launchAgentInstalled && process.platform === "darwin",
+      meta: { api, platform: process.platform },
       hint: api.launchAgentInstalled
         ? "LaunchAgent rotates the bearer every 50 minutes and rewrites ~/.lovagentic/lovable.env."
-        : "Optional. Run `./scripts/launchd/install-auth-refresh.sh` (macOS) or schedule `lovagentic auth refresh --out-env <path>` every ~50 minutes (Linux/CI cron) for hands-off token rotation."
+        : process.platform === "darwin"
+          ? "Run `lovagentic doctor --self-heal` (or `./scripts/launchd/install-auth-refresh.sh` from the repo) to install the LaunchAgent for hands-off token rotation."
+          : "Schedule `lovagentic auth refresh --out-env <path>` every ~50 minutes (Linux/CI cron) for hands-off token rotation."
     },
     { key: "lovableReachable", label: `lovable.dev reachable${network.lovable.ms != null ? ` (${network.lovable.ms}ms)` : ""}`, ok: network.lovable.ok, healable: false, hint: network.lovable.ok ? null : `Cannot reach https://lovable.dev (${network.lovable.error ?? "unknown error"}). Check internet connection or corporate proxy.` },
     { key: "npmReachable", label: `npm registry reachable${network.npm.ms != null ? ` (${network.npm.ms}ms)` : ""}`, ok: network.npm.ok, healable: false, hint: network.npm.ok ? null : `Cannot reach registry.npmjs.org (${network.npm.error ?? "unknown error"}). Required for self-update checks.` },
@@ -646,6 +652,98 @@ async function selfHealDoctor({ profileDir, desktopProfileDir, checks, json }) {
         ok: false,
         detail: "Desktop session not available. Sign in to Lovable.app and retry."
       });
+    }
+  }
+
+  // Heal Lovable API auth: if no env/cache and the user is signed into the
+  // desktop app, run `auth bootstrap` against a freshly seeded profile so
+  // we have a refresh token on disk. The check itself is always `ok: true`
+  // (the API backend has the browser fallback), so we drive the heal
+  // exclusively off the `healable` flag instead of `!c.ok`.
+  const apiAuthCheck = checks.find((c) => c.key === "lovableApiAuth");
+  if (apiAuthCheck && apiAuthCheck.healable) {
+    if (desktopCookies?.ok) {
+      log("\u2022 Bootstrapping Lovable API auth from desktop session...");
+      try {
+        const state = await bootstrapFromProfile({
+          profileDir,
+          headless: true,
+        });
+        actions.push({
+          key: "auth_bootstrap",
+          label: "Bootstrap Lovable API auth",
+          ok: true,
+          detail: `cached refresh token for ${state.email || state.userId} at ~/.lovagentic/auth.json`,
+        });
+      } catch (err) {
+        actions.push({
+          key: "auth_bootstrap",
+          label: "Bootstrap Lovable API auth",
+          ok: false,
+          detail: err?.message || String(err),
+        });
+      }
+    } else {
+      actions.push({
+        key: "auth_bootstrap",
+        label: "Bootstrap Lovable API auth",
+        ok: false,
+        detail: "Desktop session not available. Sign in to Lovable.app and retry.",
+      });
+    }
+  }
+
+  // Heal LaunchAgent (macOS only). Calls scripts/launchd/install-auth-refresh.sh
+  // bundled with the repo. We resolve the script via the package directory so
+  // it works for `npm i -g`, `npm link`, and direct repo runs. Driven by the
+  // `healable` flag so we trigger even though the check reports `ok: true`
+  // (the LaunchAgent is optional, not a hard requirement).
+  const refreshAgentCheck = checks.find((c) => c.key === "lovableAuthRefresh");
+  if (refreshAgentCheck && refreshAgentCheck.healable) {
+    if (process.platform !== "darwin") {
+      actions.push({
+        key: "install_launch_agent",
+        label: "Install Lovable auth-refresh LaunchAgent",
+        ok: false,
+        detail: "LaunchAgent installer is macOS-only. Schedule `lovagentic auth refresh --out-env <path>` via cron / systemd on this OS.",
+      });
+    } else {
+      log("\u2022 Installing Lovable auth-refresh LaunchAgent (macOS)...");
+      try {
+        const scriptPath = path.resolve(
+          path.dirname(fileURLToPath(import.meta.url)),
+          "..",
+          "scripts",
+          "launchd",
+          "install-auth-refresh.sh"
+        );
+        const exists = await pathExists(scriptPath);
+        if (!exists) {
+          actions.push({
+            key: "install_launch_agent",
+            label: "Install Lovable auth-refresh LaunchAgent",
+            ok: false,
+            detail: `installer script missing at ${scriptPath}. The LaunchAgent ships with the lovagentic source repo; npm-globally-installed copies include it under <prefix>/lib/node_modules/lovagentic/scripts/launchd/.`,
+          });
+        } else {
+          const install = await runChildProcess("bash", [scriptPath]);
+          actions.push({
+            key: "install_launch_agent",
+            label: "Install Lovable auth-refresh LaunchAgent",
+            ok: install.ok,
+            detail: install.ok
+              ? "LaunchAgent installed at ~/Library/LaunchAgents/com.lovagentic.auth-refresh.plist; runs every 50 minutes plus on login."
+              : install.error,
+          });
+        }
+      } catch (err) {
+        actions.push({
+          key: "install_launch_agent",
+          label: "Install Lovable auth-refresh LaunchAgent",
+          ok: false,
+          detail: err?.message || String(err),
+        });
+      }
     }
   }
 
