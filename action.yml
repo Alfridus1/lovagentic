@@ -1,0 +1,266 @@
+name: lovagentic runbook
+description: >-
+  Run a lovagentic YAML runbook (snapshot → diff → verify → publish) and
+  optionally post the diff summary back to the triggering PR. Default flow
+  is read-only: snapshot the current Lovable project state and compute the
+  diff against the last edit so reviewers can see what the AI agent changed
+  before they merge.
+author: Alfridus1
+branding:
+  icon: activity
+  color: purple
+
+inputs:
+  project-url:
+    description: >-
+      Lovable project URL or project id. Overrides `projectUrl` from the
+      runbook file. Falls back to the `LOVABLE_PROJECT_URL` env var.
+    required: false
+  bearer-token:
+    description: >-
+      Firebase Bearer token for the Lovable API (from
+      `lovagentic auth bootstrap` -> ~/.lovagentic/auth.json). Stored as a
+      repository secret. Either this or `api-key` is required.
+    required: false
+  api-key:
+    description: >-
+      `lov_...`-prefixed Lovable API key. Alternative to `bearer-token`.
+    required: false
+  runbook:
+    description: >-
+      Path to the YAML/JSON runbook to execute, relative to the workspace
+      root. Defaults to `.lovagentic/runbook.yaml`. If the file does not
+      exist a built-in `snapshot + diff` runbook is used.
+    required: false
+    default: ".lovagentic/runbook.yaml"
+  output-dir:
+    description: >-
+      Directory where snapshot/diff artifacts are written. Defaults to
+      `./lovagentic-output`.
+    required: false
+    default: "./lovagentic-output"
+  comment-on-pr:
+    description: >-
+      Post the runbook summary as a PR comment. Set to `false` to skip the
+      comment. Requires the workflow to provide `pull-requests: write`.
+    required: false
+    default: "true"
+  upload-artifact:
+    description: >-
+      Upload the runbook output directory as a workflow artifact. Set to
+      `false` to skip.
+    required: false
+    default: "true"
+  artifact-name:
+    description: Name of the uploaded artifact.
+    required: false
+    default: "lovagentic-runbook"
+  lovagentic-version:
+    description: >-
+      npm version spec for `lovagentic` (e.g. `latest`, `^0.3`,
+      `0.3.7`). Pin in production.
+    required: false
+    default: "^0.3"
+  fail-on-warnings:
+    description: >-
+      Fail the action if the runbook reports any warnings (truncation,
+      partial network failures, etc.). Default is to keep warnings advisory.
+    required: false
+    default: "false"
+  github-token:
+    description: >-
+      Token used to post the PR comment. Defaults to `${{ github.token }}`.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  output-dir:
+    description: Absolute path to the runbook output directory.
+    value: ${{ steps.runbook.outputs.output-dir }}
+  summary:
+    description: Path to the human-readable runbook summary (Markdown).
+    value: ${{ steps.runbook.outputs.summary }}
+  status:
+    description: "`success` if the runbook completed cleanly, `warnings` if it ran with non-fatal warnings, `failure` otherwise."
+    value: ${{ steps.runbook.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate auth
+      shell: bash
+      run: |
+        if [[ -z "${{ inputs.bearer-token }}" && -z "${{ inputs.api-key }}" ]]; then
+          echo "::error::lovagentic-runbook needs either `bearer-token` or `api-key`. Bootstrap one with `lovagentic auth bootstrap` locally and store the contents of ~/.lovagentic/auth.json's accessToken (or your lov_... API key) as a repo secret."
+          exit 1
+        fi
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+
+    - name: Install lovagentic
+      shell: bash
+      run: |
+        npm install -g "lovagentic@${{ inputs.lovagentic-version }}"
+        lovagentic --version
+
+    - name: Resolve runbook
+      id: resolve
+      shell: bash
+      env:
+        RUNBOOK_INPUT: ${{ inputs.runbook }}
+      run: |
+        set -euo pipefail
+        if [[ -f "$RUNBOOK_INPUT" ]]; then
+          echo "Using runbook: $RUNBOOK_INPUT"
+          echo "runbook=$RUNBOOK_INPUT" >>"$GITHUB_OUTPUT"
+        else
+          echo "Runbook $RUNBOOK_INPUT not found — generating a built-in snapshot+diff runbook."
+          tmp=$(mktemp /tmp/lovagentic-runbook-default-XXXXXX.yaml)
+          cat >"$tmp" <<'YAML'
+        # Built-in default runbook used by the lovagentic-runbook GitHub Action
+        # when the repository does not provide its own .lovagentic/runbook.yaml.
+        defaults:
+          backend: api
+        steps:
+          - type: snapshot
+            name: snapshot
+          - type: diff
+            name: latest-diff
+            latest: true
+        YAML
+          echo "runbook=$tmp" >>"$GITHUB_OUTPUT"
+        fi
+
+    - name: Run lovagentic runbook
+      id: runbook
+      shell: bash
+      env:
+        LOVABLE_BEARER_TOKEN: ${{ inputs.bearer-token }}
+        LOVABLE_API_KEY: ${{ inputs.api-key }}
+        LOVABLE_PROJECT_URL: ${{ inputs.project-url }}
+      run: |
+        set -euo pipefail
+        out_dir="${{ inputs.output-dir }}"
+        mkdir -p "$out_dir"
+        runbook="${{ steps.resolve.outputs.runbook }}"
+
+        extra=()
+        if [[ -n "${LOVABLE_PROJECT_URL:-}" ]]; then
+          extra+=( "--project-url" "$LOVABLE_PROJECT_URL" )
+        fi
+
+        json_path="$out_dir/runbook.json"
+        summary_path="$out_dir/SUMMARY.md"
+
+        # First pass: capture machine-readable JSON for downstream comment.
+        set +e
+        lovagentic runbook "$runbook" \
+          --backend api \
+          --output-dir "$out_dir" \
+          "${extra[@]}" \
+          --json >"$json_path"
+        rc=$?
+        set -e
+
+        # Build a compact Markdown summary from the JSON.
+        node -e "
+          const fs = require('fs');
+          const path = require('path');
+          const raw = fs.readFileSync('$json_path', 'utf8');
+          const data = JSON.parse(raw);
+          const lines = [];
+          lines.push('### lovagentic runbook');
+          lines.push('');
+          lines.push('| Field | Value |');
+          lines.push('|---|---|');
+          lines.push(\`| Runbook | \${data.runbook ?? data.name ?? '(unnamed)'} |\`);
+          lines.push(\`| Project | \${data.projectUrl ?? '(unknown)'} |\`);
+          lines.push(\`| Status  | \${data.status ?? 'unknown'} |\`);
+          lines.push(\`| Steps   | \${(data.steps || []).length} |\`);
+          lines.push('');
+          if ((data.steps || []).length) {
+            lines.push('| # | Step | Type | Status | Notes |');
+            lines.push('|---:|---|---|---|---|');
+            for (const s of data.steps) {
+              const note = s.error
+                ? '⚠️ ' + s.error
+                : (s.summary || s.outputPath || '').toString().slice(0, 200);
+              lines.push(\`| \${s.index ?? '?'} | \${s.name ?? '?'} | \${s.type ?? s.kind ?? '?'} | \${s.status ?? '?'} | \${note.replace(/\\|/g, '\\\\|')} |\`);
+            }
+            lines.push('');
+          }
+          if (Array.isArray(data.warnings) && data.warnings.length) {
+            lines.push('#### Warnings');
+            for (const w of data.warnings) lines.push('- ' + String(w).replace(/\\|/g, '\\\\|'));
+            lines.push('');
+          }
+          lines.push('_Generated by [\`lovagentic-runbook\`](https://github.com/Alfridus1/lovagentic) on ' + new Date().toISOString() + '._');
+          fs.writeFileSync('$summary_path', lines.join('\\n'));
+        "
+
+        echo "output-dir=$out_dir" >>"$GITHUB_OUTPUT"
+        echo "summary=$summary_path" >>"$GITHUB_OUTPUT"
+
+        # Surface the summary in the GitHub job UI.
+        cat "$summary_path" >>"$GITHUB_STEP_SUMMARY" || true
+
+        # Decide the action status.
+        warnings_count=$(node -e "const d=require('$json_path'); console.log(Array.isArray(d.warnings)?d.warnings.length:0)")
+        status="success"
+        if [[ $rc -ne 0 ]]; then
+          status="failure"
+        elif [[ "${{ inputs.fail-on-warnings }}" == "true" && $warnings_count -gt 0 ]]; then
+          status="failure"
+        elif [[ $warnings_count -gt 0 ]]; then
+          status="warnings"
+        fi
+        echo "status=$status" >>"$GITHUB_OUTPUT"
+
+        if [[ "$status" == "failure" ]]; then
+          exit 1
+        fi
+
+    - name: Upload runbook artifact
+      if: ${{ inputs.upload-artifact == 'true' && always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.runbook.outputs.output-dir }}
+        if-no-files-found: warn
+
+    - name: Comment on PR
+      if: ${{ inputs.comment-on-pr == 'true' && github.event_name == 'pull_request' && always() }}
+      uses: actions/github-script@v7
+      env:
+        SUMMARY_PATH: ${{ steps.runbook.outputs.summary }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const summaryPath = process.env.SUMMARY_PATH;
+          if (!summaryPath || !fs.existsSync(summaryPath)) {
+            core.warning(`Summary file not found at ${summaryPath}; skipping PR comment.`);
+            return;
+          }
+          const body = fs.readFileSync(summaryPath, 'utf8');
+          const marker = '<!-- lovagentic-runbook-summary -->';
+          const fullBody = `${marker}\n${body}`;
+          const { owner, repo } = context.repo;
+          const issue_number = context.payload.pull_request?.number ?? context.issue.number;
+          if (!issue_number) {
+            core.warning('No pull_request number in context; skipping comment.');
+            return;
+          }
+          const list = await github.paginate(github.rest.issues.listComments, {
+            owner, repo, issue_number, per_page: 100,
+          });
+          const existing = list.find((c) => c.body && c.body.includes(marker));
+          if (existing) {
+            await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: fullBody });
+          } else {
+            await github.rest.issues.createComment({ owner, repo, issue_number, body: fullBody });
+          }

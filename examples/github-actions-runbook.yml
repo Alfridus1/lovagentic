@@ -1,0 +1,63 @@
+# .github/workflows/lovagentic-runbook.yml
+#
+# Runs `lovagentic runbook` against your Lovable project on every PR and
+# posts the diff summary back to the PR. The default flow is read-only:
+# snapshot the project state and compute the diff against the latest edit.
+#
+# Required repository secrets (set in Settings → Secrets and variables →
+# Actions):
+#
+#   LOVABLE_BEARER_TOKEN   The `accessToken` from `~/.lovagentic/auth.json`
+#                          after you ran `lovagentic auth bootstrap`. Or use
+#                          `LOVABLE_API_KEY` instead if you have a `lov_…`
+#                          API key.
+#
+# Required repository variables (set in Settings → Secrets and variables →
+# Actions → Variables):
+#
+#   LOVABLE_PROJECT_URL    The full Lovable project URL, e.g.
+#                          https://lovable.dev/projects/<uuid>. Optional if
+#                          your `.lovagentic/runbook.yaml` sets `projectUrl:`.
+
+name: Lovable runbook
+
+on:
+  pull_request:
+    paths:
+      - "prompts/**"
+      - ".lovagentic/**"
+      - ".github/workflows/lovagentic-runbook.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  runbook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run lovagentic runbook
+        uses: Alfridus1/lovagentic@v0.3.8
+        with:
+          # Either the bearer token or the API key. Prefer the API key once
+          # Lovable mints one for your workspace; the bearer is short-lived
+          # but works fine for one-shot Actions because each run mints a
+          # fresh token via Firebase securetoken on bootstrap.
+          bearer-token: ${{ secrets.LOVABLE_BEARER_TOKEN }}
+          # api-key: ${{ secrets.LOVABLE_API_KEY }}
+
+          project-url: ${{ vars.LOVABLE_PROJECT_URL }}
+
+          # Falls back to a built-in `snapshot + diff` runbook when the path
+          # below does not exist in the repo.
+          runbook: .lovagentic/runbook.yaml
+
+          # Defaults are sane; override only if you need something custom.
+          # output-dir: ./lovagentic-output
+          # comment-on-pr: "true"
+          # upload-artifact: "true"
+          # fail-on-warnings: "false"
+          # lovagentic-version: "^0.3"

@@ -196,6 +196,34 @@ lovagentic publish "..." --json | jq '.liveUrl'
 
 Use it from Claude, GPT, Codex, or any agent that can run shell commands.
 
+### GitHub Action
+
+Drop the `lovagentic-runbook` action into your Lovable project repo to run
+snapshot + diff (or any other runbook) on every PR and have the result
+posted back as a comment:
+
+```yaml
+# .github/workflows/lovagentic-runbook.yml
+name: Lovable runbook
+on: { pull_request: { branches: [main] } }
+permissions: { contents: read, pull-requests: write }
+jobs:
+  runbook:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Alfridus1/lovagentic@v0.3.8
+        with:
+          bearer-token: ${{ secrets.LOVABLE_BEARER_TOKEN }}
+          project-url:  ${{ vars.LOVABLE_PROJECT_URL }}
+```
+
+Falls back to a built-in `snapshot + diff` runbook when no
+`.lovagentic/runbook.yaml` is present. Full example workflow at
+[`examples/github-actions-runbook.yml`](examples/github-actions-runbook.yml)
+and a starter runbook at
+[`examples/lovagentic-runbook.default.yaml`](examples/lovagentic-runbook.default.yaml).
+
 ---
 
 ## Environment variables

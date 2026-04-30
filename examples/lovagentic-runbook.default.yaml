@@ -1,0 +1,51 @@
+# Default `.lovagentic/runbook.yaml` template.
+#
+# Drop this into `.lovagentic/runbook.yaml` in your Lovable project repo
+# and the lovagentic-runbook GitHub Action will execute it on every PR
+# (set up via examples/github-actions-runbook.yml).
+#
+# This particular runbook is fully read-only — it captures the current
+# project state and the diff for the latest commit so reviewers can see
+# what the AI agent changed before they merge. Add more steps below
+# (`prompt`, `wait`, `verify`, `publish`) as your workflow grows.
+
+# Optional: the project URL. Will be overridden by the action's
+# `project-url` input or the `LOVABLE_PROJECT_URL` env var when set.
+# projectUrl: https://lovable.dev/projects/<uuid>
+
+defaults:
+  backend: api
+
+steps:
+  # 1. Capture the live state of the project. Includes file tree, edits,
+  #    knowledge, database, and (with `--mcp`) MCP catalog. Output lands
+  #    in `<output-dir>/<step-slug>.json` — picked up by the Action and
+  #    surfaced as a workflow artifact.
+  - type: snapshot
+    name: snapshot
+    # Tune if your project is bigger than the default 500-file cap.
+    # maxFiles: 1000
+    # maxEdits: 100
+    # database: true   # default; flip to false to skip the DB probe.
+
+  # 2. Compute the diff for the latest commit so reviewers see what the
+  #    AI agent did since the last run.
+  - type: diff
+    name: latest-diff
+    latest: true
+
+# More step types you can add:
+#
+#  - type: prompt           # Send a chat turn to Lovable.
+#    name: refine-design
+#    prompt: |
+#      Tighten the spacing on the hero section and add a subtle gradient.
+#
+#  - type: wait              # Wait until Lovable goes idle.
+#    name: idle
+#
+#  - type: verify            # Capture before/after screenshots of the
+#    name: verify             # live preview, fail on console errors.
+#
+#  - type: publish           # Push to <slug>.lovable.app.
+#    name: ship

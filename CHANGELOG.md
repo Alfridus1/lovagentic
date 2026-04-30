@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-04-30
+
+### Added
+
+- New first-class **GitHub Action** at the root of the repo (`action.yml`) that runs `lovagentic runbook` against a PR and posts the result back as a comment. Works as `uses: Alfridus1/lovagentic@v0.3.8` once consumers tag the release. Inputs: `bearer-token` / `api-key`, `project-url`, `runbook` (defaults to `.lovagentic/runbook.yaml`, falls back to a built-in `snapshot + diff` runbook when missing), `output-dir`, `comment-on-pr`, `upload-artifact`, `lovagentic-version`, `fail-on-warnings`. Outputs: `output-dir`, `summary`, `status`. The PR comment is upserted against a marker so repeated runs do not spam the thread, and the runbook artifact is uploaded for offline inspection.
+- Example workflow at [`examples/github-actions-runbook.yml`](./examples/github-actions-runbook.yml) and a starter runbook at [`examples/lovagentic-runbook.default.yaml`](./examples/lovagentic-runbook.default.yaml) so consumers can drop both files into a Lovable project repo and have CI working in under a minute.
+- README now links the GitHub Action under the "Agent-ready: pipe it, script it" section.
+
 ## [0.3.7] - 2026-04-30
 
 ### Fixed
