@@ -1096,6 +1096,7 @@ Options:
                     (default: false)
   --no-knowledge    Skip project and workspace knowledge
   --no-edits        Skip edit history
+  --no-database     Skip the database status probe
   --mcp             Include workspace MCP servers/connectors/catalog (default:
                     false)
   --output <path>   Write the full snapshot JSON to this path
