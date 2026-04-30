@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-04-30
+
+### Added
+
+- API backend `getProjectState(projectId)` now grafts the aggregate-only fields (`tech_stack`, `edit_count`, `created_at`, `updated_at`, `last_edited_at`, `last_viewed_at`, `user_display_name`, `user_photo_url`, `is_starred`, `remix_count`, `trending_score`, `app_visitors_*`) from the project list response onto the slim single-get payload. Live recon confirmed `GET /v1/projects/{pid}` deliberately omits these fields, while `GET /v1/workspaces/{wsId}/projects` items carry them. The workaround is non-destructive (slim values like `latest_commit_sha` and `latest_screenshot_url` always win) and caches list pages per workspace for 30s so back-to-back lookups share one round-trip.
+- New `getProjectState(id, { fast: true })` (and convenience `getProjectStateFast(id)`) opt-out for callers that don't need aggregates and want the original SDK shape unchanged.
+- Exported `enrichProjectWithAggregates`, `mergeProjectAggregates`, and `clearApiBackendCaches` from `src/backends/api-backend.js` so they can be reused or mocked from outside the backend.
+- Regression tests for the merge logic, cache reuse, soft-fail on list errors, and the no-op path when input is already enriched (6 new tests, 78/78 pass).
+
 ## [0.3.1] - 2026-04-30
 
 ### Fixed

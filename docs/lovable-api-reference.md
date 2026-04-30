@@ -450,6 +450,13 @@ If you need aggregate fields like `tech_stack`, `edit_count`, `created_at`,
 by id. The single-get always carries `latest_commit_sha` and
 `latest_screenshot_url`.
 
+**Tip**: `lovagentic`'s `apiBackend.getProjectState(id)` already does this
+workaround for you (since v0.3.2). It runs the slim get plus a cached
+workspace list and returns a merged object, with non-destructive defaults so
+`latest_commit_sha`/`latest_screenshot_url` from the slim call still win.
+Pass `{ fast: true }` to opt out of the round-trip when you don't need the
+aggregates.
+
 ---
 
 ### `PUT /v1/projects/{pid}/visibility`

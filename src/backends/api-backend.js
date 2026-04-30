@@ -83,6 +83,89 @@ export function getApiBackendCapabilities() {
   ]);
 }
 
+// Live recon against api.lovable.dev confirmed that GET /v1/projects/{pid}
+// returns a slimmer payload than items in GET /v1/workspaces/{wsId}/projects.
+// Fields like tech_stack, edit_count, created_at, updated_at, last_edited_at,
+// last_viewed_at, app_visitors_*, trending_score, user_display_name,
+// user_photo_url, is_starred, remix_count, etc. live ONLY on list items.
+//
+// We enrich the single-get response by fetching the workspace's project list
+// and merging the matching item back in. The list page is cached briefly per
+// workspace so consecutive lookups don't multiply the round-trips.
+const PROJECT_AGGREGATE_FIELDS = [
+  "tech_stack",
+  "created_at",
+  "updated_at",
+  "last_edited_at",
+  "last_viewed_at",
+  "edit_count",
+  "user_display_name",
+  "user_photo_url",
+  "created_by",
+  "user_id",
+  "is_starred",
+  "remix_count",
+  "trending_score",
+  "app_visitors_24h",
+  "app_visitors_7d",
+  "app_visitors_30d",
+  "is_deleted",
+  "exclude_from_being_read",
+  "shared_context_admin_isolated",
+];
+
+const PROJECT_LIST_CACHE_TTL_MS = 30_000;
+const projectListCache = new Map(); // workspaceId -> { fetchedAt, projects: Map<pid, listItem> }
+
+function projectsCacheKey(workspaceId) {
+  return String(workspaceId || "");
+}
+
+function getCachedProjectListItem(workspaceId, projectId) {
+  const key = projectsCacheKey(workspaceId);
+  const entry = projectListCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt > PROJECT_LIST_CACHE_TTL_MS) {
+    projectListCache.delete(key);
+    return null;
+  }
+  return entry.projects.get(projectId) || null;
+}
+
+function storeProjectListInCache(workspaceId, projects) {
+  const key = projectsCacheKey(workspaceId);
+  const map = new Map();
+  for (const p of projects || []) {
+    if (p?.id) map.set(p.id, p);
+  }
+  projectListCache.set(key, { fetchedAt: Date.now(), projects: map });
+}
+
+export function clearApiBackendCaches() {
+  projectListCache.clear();
+}
+
+/**
+ * Merge aggregate-only fields from a list-item shape onto a single-get
+ * project shape, without overriding fields the single-get already provides
+ * (e.g. latest_commit_sha, latest_screenshot_url).
+ */
+export function mergeProjectAggregates(slim, listItem) {
+  if (!slim || !listItem) return slim;
+  const enriched = { ...slim };
+  for (const f of PROJECT_AGGREGATE_FIELDS) {
+    if (enriched[f] === undefined && listItem[f] !== undefined) {
+      enriched[f] = listItem[f];
+    }
+  }
+  // The single-get omits `name` (slug) on some plans but keeps display_name;
+  // the list always carries both. Surface the slug if missing.
+  if (enriched.name === undefined && listItem.name !== undefined) {
+    enriched.name = listItem.name;
+  }
+  return enriched;
+}
+
 export async function createApiBackend(options = {}) {
   let config = resolveApiBackendConfig(options);
   if (config.hasApiKey && config.hasBearerToken) {
@@ -165,7 +248,20 @@ export async function createApiBackend(options = {}) {
       return await client.createProject(workspaceId, await normalizeProjectOptions(options));
     },
 
-    async getProjectState(projectId) {
+    async getProjectState(projectId, opts = {}) {
+      const slim = await client.getProject(projectId);
+      // Per-call escape hatch for callers that don't need aggregates and
+      // want to skip the second round-trip.
+      if (opts.fast === true) return slim;
+      const enriched = await enrichProjectWithAggregates(client, slim);
+      return enriched;
+    },
+
+    /**
+     * Convenience for callers who only want the slim single-get response.
+     * Equivalent to `getProjectState(id, { fast: true })`.
+     */
+    async getProjectStateFast(projectId) {
       return await client.getProject(projectId);
     },
 
@@ -399,6 +495,40 @@ function safeConfig(config) {
     hasBearerToken: config.hasBearerToken,
     configured: config.configured
   };
+}
+
+/**
+ * Take a single-get project response and graft on the aggregate-only fields
+ * from the project list endpoint. Caches list pages per workspace for
+ * `PROJECT_LIST_CACHE_TTL_MS` so back-to-back enriches share one round-trip.
+ *
+ * Failure modes are intentionally soft: if the workspace_id is missing on the
+ * slim response, or the list endpoint is rate-limited, we return the slim
+ * response unchanged rather than failing the call.
+ */
+export async function enrichProjectWithAggregates(client, slim) {
+  if (!slim || typeof slim !== "object") return slim;
+  const wsId = slim.workspace_id;
+  if (!wsId) return slim;
+
+  // Already enriched? Avoid the round-trip.
+  if (slim.tech_stack !== undefined || slim.edit_count !== undefined) {
+    return slim;
+  }
+
+  const cached = getCachedProjectListItem(wsId, slim.id);
+  if (cached) return mergeProjectAggregates(slim, cached);
+
+  try {
+    const list = await client.listProjects(wsId, { limit: 100, sort_by: "last_edited_at", sort_order: "desc" });
+    const projects = list?.projects || [];
+    storeProjectListInCache(wsId, projects);
+    const item = projects.find((p) => p?.id === slim.id);
+    return mergeProjectAggregates(slim, item);
+  } catch {
+    // Soft-fail: prefer a slim object over a thrown error.
+    return slim;
+  }
 }
 
 export { CAPABILITIES };
