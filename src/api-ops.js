@@ -54,6 +54,7 @@ export async function buildApiSnapshot(apiBackend, targetUrl, options = {}) {
     files: null,
     fileContents: null,
     edits: null,
+    database: null,
     mcp: null,
     warnings: []
   };
@@ -89,13 +90,21 @@ export async function buildApiSnapshot(apiBackend, targetUrl, options = {}) {
   }
 
   let files = [];
+  let filesTruncated = false;
   if (options.files !== false) {
     const filesResponse = await maybeCall(() => apiBackend.listFiles(projectId, ref), {
       warnings: snapshot.warnings,
       label: "file list"
     });
-    files = normalizeFileEntries(filesResponse).slice(0, maxFiles);
-    const total = normalizeFileEntries(filesResponse).length;
+    const allFiles = normalizeFileEntries(filesResponse);
+    files = allFiles.slice(0, maxFiles);
+    const total = allFiles.length;
+    filesTruncated = total > files.length;
+    if (filesTruncated) {
+      snapshot.warnings.push(
+        `Files truncated: showing ${files.length} of ${total} entries; pass --max-files <n> to widen.`
+      );
+    }
     snapshot.files = {
       ref,
       total,
@@ -145,6 +154,17 @@ export async function buildApiSnapshot(apiBackend, targetUrl, options = {}) {
       hasMore: Boolean(editsResponse?.has_more),
       entries: editsResponse?.edits ?? []
     };
+  }
+
+  // Database state (Lovable Cloud / Supabase). Cheap one-shot call;
+  // returns `{ enabled: false }` for projects without a managed DB and
+  // `{ enabled: true, stack: "supabase" }` for those with one. Disabled
+  // by default if the caller passes `database: false`.
+  if (options.database !== false && typeof apiBackend.getDatabaseStatus === "function") {
+    snapshot.database = await maybeCall(() => apiBackend.getDatabaseStatus(projectId), {
+      warnings: snapshot.warnings,
+      label: "database status"
+    });
   }
 
   if (options.mcp && workspaceId) {
@@ -261,17 +281,31 @@ export async function writeJsonFile(filePath, data) {
 }
 
 export function formatSnapshotSummary(snapshot) {
+  const dbStatus = snapshot.database
+    ? snapshot.database.enabled
+      ? `enabled (${snapshot.database.stack || "unknown stack"})`
+      : "not enabled"
+    : "skipped";
+  const filesLine = snapshot.files
+    ? snapshot.files.truncated
+      ? `⚠️  ${snapshot.files.returned}/${snapshot.files.total} (truncated; pass --max-files <n> to widen)`
+      : `${snapshot.files.returned}/${snapshot.files.total}`
+    : "skipped";
   const lines = [
     `Snapshot: ${snapshot.project?.display_name || snapshot.project?.name || snapshot.projectId}`,
     `Project: ${snapshot.projectUrl}`,
     `Preview: ${snapshot.previewUrl}`,
     `Published: ${snapshot.publishedUrl || "(not published or unavailable)"}`,
-    `Files: ${snapshot.files ? `${snapshot.files.returned}/${snapshot.files.total}${snapshot.files.truncated ? " (truncated)" : ""}` : "skipped"}`,
+    `Files: ${filesLine}`,
     `File contents: ${snapshot.fileContents ? snapshot.fileContents.total : "skipped"}`,
     `Edits: ${snapshot.edits ? `${snapshot.edits.total}${snapshot.edits.hasMore ? "+" : ""}` : "skipped"}`,
     `Knowledge: ${snapshot.knowledge ? "included" : "skipped"}`,
+    `Database: ${dbStatus}`,
     `Warnings: ${snapshot.warnings.length}`
   ];
+  if (snapshot.warnings.length) {
+    for (const w of snapshot.warnings) lines.push(`  - ${w}`);
+  }
   return lines.join("\n");
 }
 

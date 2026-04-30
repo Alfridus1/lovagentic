@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-04-30
+
+### Fixed
+
+- `lovagentic snapshot` now captures the project's database state. Previously the snapshot shape had no `database` field at all and `getDatabaseStatus` was wired into the API backend but never invoked from the snapshot path. Default behaviour now calls `getDatabaseStatus(projectId)` and writes either `{ enabled: false }` or `{ enabled: true, stack: "supabase" }` into `snapshot.database`. Pass `--no-database` to skip the probe (useful for projects without backend access). Runbook snapshot steps honour the same opt-out via `database: false`.
+
+### Changed
+
+- File-truncation in snapshots is now visible in the human summary instead of buried in the JSON. When `--max-files` cuts off the listing, the summary prints a `⚠️ Files: X/Y (truncated; pass --max-files <n> to widen)` row and the snapshot's `warnings` array carries a matching message that downstream tooling can surface. The truncation flag is recorded the same way regardless of CLI vs runbook entry point.
+- `lovagentic snapshot` summary now includes a `Database: enabled (<stack>)` / `Database: not enabled` / `Database: skipped` row beside the existing `Files`, `Edits`, `Knowledge`, and `Warnings` rows.
+- Runbooks accept `kind:` and `command:` as aliases for `type:` so YAML written with the most common typo (`kind:`) parses cleanly. Steps that miss the field entirely raise `Runbook step N is missing a step type. Use one of: <supported list>. Set it under \`type:\` (or \`kind:\` / \`command:\` as aliases). Step keys present: <observed keys>` instead of the previous opaque `unsupported type "undefined"` error.
+
 ## [0.3.6] - 2026-04-30
 
 ### Added

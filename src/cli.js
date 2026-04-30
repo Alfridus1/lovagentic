@@ -3133,6 +3133,7 @@ program
   .option("--file-content", "Include text file contents for listed non-binary files", false)
   .option("--no-knowledge", "Skip project and workspace knowledge")
   .option("--no-edits", "Skip edit history")
+  .option("--no-database", "Skip the database status probe")
   .option("--mcp", "Include workspace MCP servers/connectors/catalog", false)
   .option("--output <path>", "Write the full snapshot JSON to this path")
   .option("--json", "Print the full snapshot JSON", false)
@@ -3146,6 +3147,7 @@ program
       fileContent: Boolean(options.fileContent),
       knowledge: Boolean(options.knowledge),
       edits: Boolean(options.edits),
+      database: Boolean(options.database),
       mcp: Boolean(options.mcp)
     });
 
@@ -4112,6 +4114,7 @@ async function executeRunbookStep({
       fileContent: Boolean(step.fileContent),
       knowledge: step.knowledge !== false,
       edits: step.edits !== false,
+      database: step.database !== false,
       mcp: Boolean(step.mcp)
     });
     // Persist the snapshot. If the step did not specify an explicit `output`,

@@ -57,7 +57,35 @@ test("normalizeRunbook rejects unsupported step types", () => {
       projectUrl: "https://lovable.dev/projects/36597153-8b79-41be-8d71-3d9d3afa4a39",
       steps: [{ type: "transfer-ownership" }]
     }),
-    /unsupported type/i
+    /unsupported type.*Use one of/i
+  );
+});
+
+test("normalizeRunbook accepts `kind:` as an alias for `type:`", () => {
+  const runbook = normalizeRunbook({
+    projectUrl: "https://lovable.dev/projects/36597153-8b79-41be-8d71-3d9d3afa4a39",
+    steps: [{ kind: "snapshot", name: "capture" }],
+  });
+  assert.equal(runbook.steps[0].type, "snapshot");
+  assert.equal(runbook.steps[0].name, "capture");
+});
+
+test("normalizeRunbook accepts `command:` as an alias for `type:`", () => {
+  const runbook = normalizeRunbook({
+    projectUrl: "https://lovable.dev/projects/36597153-8b79-41be-8d71-3d9d3afa4a39",
+    steps: [{ command: "diff" }],
+  });
+  assert.equal(runbook.steps[0].type, "diff");
+});
+
+test("normalizeRunbook surfaces a useful error when a step has no type/kind/command", () => {
+  assert.throws(
+    () =>
+      normalizeRunbook({
+        projectUrl: "https://lovable.dev/projects/36597153-8b79-41be-8d71-3d9d3afa4a39",
+        steps: [{ name: "my-step", foo: "bar" }],
+      }),
+    /missing a step type.*kind.*command.*Step keys present: name, foo/i
   );
 });
 

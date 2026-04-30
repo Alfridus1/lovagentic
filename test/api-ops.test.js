@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   buildApiDiff,
+  buildApiSnapshot,
+  formatSnapshotSummary,
   getProjectIdFromTarget,
   summarizeApiDiff
 } from "../src/api-ops.js";
@@ -103,4 +105,102 @@ test("buildApiDiff fails clearly when latest edit has no commit sha", async () =
     ),
     /commit sha/i
   );
+});
+
+// ---- snapshot: database state + truncation warnings ----
+
+function makeFakeSnapshotBackend({ files = [], database = null, calls = {} } = {}) {
+  return {
+    getProjectState: async () => {
+      calls.getProjectState = (calls.getProjectState || 0) + 1;
+      return {
+        id: "abc",
+        workspace_id: "ws_1",
+        display_name: "Test",
+        status: "completed",
+      };
+    },
+    getPreviewUrl: () => "https://preview/abc",
+    getPublishedUrl: async () => null,
+    getWorkspace: async () => null,
+    getProjectKnowledge: async () => ({ content: "" }),
+    getWorkspaceKnowledge: async () => ({ content: "" }),
+    listFiles: async () => ({ files }),
+    listEdits: async () => ({ edits: [], has_more: false }),
+    getDatabaseStatus: async () => {
+      calls.getDatabaseStatus = (calls.getDatabaseStatus || 0) + 1;
+      return database;
+    },
+  };
+}
+
+test("buildApiSnapshot includes the project's database status by default", async () => {
+  const calls = {};
+  const backend = makeFakeSnapshotBackend({
+    database: { enabled: true, stack: "supabase" },
+    calls,
+  });
+  const snapshot = await buildApiSnapshot(
+    backend,
+    "https://lovable.dev/projects/36597153-8b79-41be-8d71-3d9d3afa4a39"
+  );
+  assert.deepEqual(snapshot.database, { enabled: true, stack: "supabase" });
+  assert.equal(calls.getDatabaseStatus, 1, "getDatabaseStatus must run by default");
+});
+
+test("buildApiSnapshot honours { database: false } as an opt-out", async () => {
+  const calls = {};
+  const backend = makeFakeSnapshotBackend({
+    database: { enabled: true, stack: "supabase" },
+    calls,
+  });
+  const snapshot = await buildApiSnapshot(
+    backend,
+    "https://lovable.dev/projects/36597153-8b79-41be-8d71-3d9d3afa4a39",
+    { database: false }
+  );
+  assert.equal(snapshot.database, null);
+  assert.equal(
+    calls.getDatabaseStatus,
+    undefined,
+    "getDatabaseStatus must NOT run when database: false"
+  );
+});
+
+test("buildApiSnapshot pushes a warning when files are truncated", async () => {
+  const files = Array.from({ length: 200 }, (_, i) => ({
+    path: `src/file-${i}.ts`,
+    size: 100,
+    binary: false,
+  }));
+  const backend = makeFakeSnapshotBackend({ files });
+  const snapshot = await buildApiSnapshot(
+    backend,
+    "https://lovable.dev/projects/36597153-8b79-41be-8d71-3d9d3afa4a39",
+    { maxFiles: 50 }
+  );
+  assert.equal(snapshot.files.truncated, true);
+  assert.ok(
+    snapshot.warnings.some((w) => /Files truncated.*--max-files/i.test(w)),
+    `expected a truncation warning, got ${JSON.stringify(snapshot.warnings)}`
+  );
+});
+
+test("formatSnapshotSummary includes the database row and a loud truncation hint", () => {
+  const snapshotEnabled = {
+    project: { display_name: "x" },
+    projectId: "abc",
+    projectUrl: "u",
+    previewUrl: "p",
+    publishedUrl: null,
+    files: { returned: 50, total: 200, truncated: true },
+    edits: { total: 1, hasMore: false },
+    knowledge: { content: "k" },
+    database: { enabled: true, stack: "supabase" },
+    warnings: ["Files truncated: showing 50 of 200 entries; pass --max-files <n> to widen."],
+  };
+  const out = formatSnapshotSummary(snapshotEnabled);
+  assert.match(out, /Database: enabled \(supabase\)/);
+  assert.match(out, /⚠️.*truncated.*--max-files/);
+  assert.match(out, /Files truncated: showing 50 of 200/);
 });

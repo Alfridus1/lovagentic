@@ -57,9 +57,27 @@ export function normalizeStep(step, index) {
     throw new Error(`Runbook step ${index + 1} must be an object.`);
   }
 
-  const type = String(step.type || step.command || "").trim().toLowerCase();
+  // Accept `type:` (canonical), `kind:` (common alias), and `command:` (legacy)
+  // so a YAML written with any of them parses cleanly. Common typo source
+  // because the rest of the lovagentic CLI uses `--backend <kind>` and
+  // talks about "step kinds" in prose.
+  const rawType = step.type ?? step.kind ?? step.command;
+  const type = String(rawType || "").trim().toLowerCase();
+  if (!type) {
+    const supported = [...SUPPORTED_STEP_TYPES].sort().join(", ");
+    const offered = Object.keys(step).join(", ") || "(none)";
+    throw new Error(
+      `Runbook step ${index + 1} is missing a step type. Use one of: ${supported}. ` +
+      `Set it under \`type:\` (or \`kind:\` / \`command:\` as aliases). ` +
+      `Step keys present: ${offered}.`
+    );
+  }
   if (!SUPPORTED_STEP_TYPES.has(type)) {
-    throw new Error(`Runbook step ${index + 1} has unsupported type "${step.type || step.command}".`);
+    const supported = [...SUPPORTED_STEP_TYPES].sort().join(", ");
+    throw new Error(
+      `Runbook step ${index + 1} has unsupported type "${rawType}". ` +
+      `Use one of: ${supported}.`
+    );
   }
 
   return {
