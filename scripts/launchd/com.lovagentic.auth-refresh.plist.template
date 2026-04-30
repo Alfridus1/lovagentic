@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.lovagentic.auth-refresh</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>__NODE_BIN__</string>
+      <string>__CLI_REAL__</string>
+      <string>auth</string>
+      <string>refresh</string>
+      <string>--out-env</string>
+      <string>__ENV_FILE__</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>3000</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>__PATH__</string>
+      <key>HOME</key>
+      <string>__HOME__</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/auth-refresh.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/auth-refresh.err.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__</string>
+  </dict>
+</plist>

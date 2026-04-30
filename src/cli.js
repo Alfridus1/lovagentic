@@ -44,6 +44,17 @@ import {
   writeJsonFile
 } from "./api-ops.js";
 import {
+  AUTH_FILE_PATH,
+  AuthError,
+  bootstrapFromProfile,
+  getValidAccessToken,
+  loadAuthState,
+  refreshCached,
+  saveAuthState,
+  summarizeAuthState,
+  writeEnvFile,
+} from "./auth.js";
+import {
   DEFAULT_BASE_URL,
   DEFAULT_DESKTOP_APP_PATH,
   getDesktopProfileDir,
@@ -258,11 +269,22 @@ program
   .option("--json", "Print machine-readable JSON", false)
   .action(async (options) => {
     const sdkVersion = getInstalledPackageVersion("@lovable.dev/sdk");
-    const configured = Boolean(process.env.LOVABLE_API_KEY || process.env.LOVABLE_BEARER_TOKEN);
+    const apiKeyEnv = Boolean(process.env.LOVABLE_API_KEY);
+    const bearerEnv = Boolean(process.env.LOVABLE_BEARER_TOKEN);
+    let cacheState = null;
+    try {
+      cacheState = await loadAuthState();
+    } catch {
+      cacheState = null;
+    }
+    const cacheUsable = Boolean(cacheState?.refreshToken && cacheState?.firebaseApiKey);
+    const configured = apiKeyEnv || bearerEnv || cacheUsable;
     const result = {
       configured,
-      apiKeyConfigured: Boolean(process.env.LOVABLE_API_KEY),
-      bearerTokenConfigured: Boolean(process.env.LOVABLE_BEARER_TOKEN),
+      apiKeyConfigured: apiKeyEnv,
+      bearerTokenConfigured: bearerEnv,
+      authCacheConfigured: cacheUsable,
+      authSource: apiKeyEnv ? "env-api-key" : bearerEnv ? "env-bearer" : cacheUsable ? "auth-cache" : null,
       baseUrl: options.baseUrl,
       sdkVersion,
       validated: false,
@@ -273,7 +295,7 @@ program
 
     if (options.validate) {
       if (!configured) {
-        result.error = "LOVABLE_API_KEY or LOVABLE_BEARER_TOKEN is not set.";
+        result.error = "No Lovable auth available. Set LOVABLE_API_KEY/LOVABLE_BEARER_TOKEN or run `lovagentic auth bootstrap`.";
       } else {
         try {
           const { createApiBackend } = await import("./backends/api-backend.js");
@@ -300,7 +322,7 @@ program
       console.log(JSON.stringify(result, null, 2));
     } else {
       console.log(`Lovable API SDK: ${sdkVersion ?? "not installed"}`);
-      console.log(`API auth: ${configured ? "configured" : "not configured"}`);
+      console.log(`API auth: ${configured ? `configured (source: ${result.authSource})` : "not configured"}`);
       console.log(`Base URL: ${options.baseUrl}`);
       if (options.validate) {
         if (result.validated) {
@@ -313,11 +335,181 @@ program
           console.log(`Validation failed: ${result.error}`);
         }
       } else if (!configured) {
-        console.log("Set LOVABLE_API_KEY=lov_... to enable API-backed flows.");
+        console.log("Set LOVABLE_API_KEY=lov_... or run `lovagentic auth bootstrap` to enable API-backed flows.");
       }
     }
 
     if (options.validate && !result.validated) {
+      process.exitCode = 1;
+    }
+  });
+
+function printAuthHuman(summary, extras = {}) {
+  if (!summary?.configured) {
+    console.log("Auth: not configured");
+    console.log("Run `lovagentic auth bootstrap` after logging into Lovable Desktop / `lovagentic login`.");
+    return;
+  }
+  console.log(`Auth: configured (${summary.email || summary.userId || "unknown user"})`);
+  if (summary.accessTokenExpiresAt) {
+    const seconds = summary.accessTokenSecondsRemaining ?? 0;
+    const minutes = Math.floor(Math.max(0, seconds) / 60);
+    console.log(
+      `Access token expires: ${summary.accessTokenExpiresAt} (${minutes} min, ${seconds}s remaining)`
+    );
+  }
+  console.log(`Refresh token: ${summary.hasRefreshToken ? "present" : "missing"}`);
+  console.log(`Firebase API key: ${summary.firebaseApiKey || "unknown"}`);
+  if (extras.filePath) console.log(`Auth file: ${extras.filePath}`);
+  if (extras.refreshed != null) {
+    console.log(`Refreshed this run: ${extras.refreshed ? "yes" : "no"}`);
+  }
+  if (extras.envFile) console.log(`Env file written: ${extras.envFile}`);
+}
+
+const authCmd = program
+  .command("auth")
+  .description(
+    "Manage Lovable API authentication: bootstrap from a logged-in browser profile, refresh, inspect, and export."
+  );
+
+authCmd
+  .command("bootstrap")
+  .description(
+    "Extract Firebase auth state from a logged-in browser profile and store it for refresh-driven token rotation."
+  )
+  .option("--profile-dir <path>", "Override the CLI browser profile path")
+  .option("--auth-file <path>", "Override the persisted auth file path", AUTH_FILE_PATH)
+  .option("--no-headless", "Run the extraction browser visibly")
+  .option("--out-env <path>", "Also write a shell-sourceable env file with the new bearer token")
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (options) => {
+    try {
+      const state = await bootstrapFromProfile({
+        profileDir: options.profileDir,
+        headless: options.headless !== false,
+        filePath: options.authFile,
+      });
+      let envFilePath = null;
+      if (options.outEnv) {
+        const result = await writeEnvFile(options.outEnv, {
+          authFilePath: options.authFile,
+          refreshIfNeeded: false,
+        });
+        envFilePath = result.filePath;
+      }
+      const summary = summarizeAuthState(state);
+      if (options.json) {
+        console.log(JSON.stringify({ summary, authFile: options.authFile, envFile: envFilePath }, null, 2));
+      } else {
+        printAuthHuman(summary, { filePath: options.authFile, envFile: envFilePath, refreshed: true });
+      }
+    } catch (err) {
+      const message = err instanceof AuthError ? err.message : err?.message || String(err);
+      console.error(`auth bootstrap failed: ${message}`);
+      process.exitCode = 1;
+    }
+  });
+
+authCmd
+  .command("refresh")
+  .description("Force a token refresh using the cached refresh token.")
+  .option("--auth-file <path>", "Override the persisted auth file path", AUTH_FILE_PATH)
+  .option("--out-env <path>", "Also write a shell-sourceable env file after refreshing")
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (options) => {
+    try {
+      const state = await refreshCached({ filePath: options.authFile });
+      let envFilePath = null;
+      if (options.outEnv) {
+        const result = await writeEnvFile(options.outEnv, {
+          authFilePath: options.authFile,
+          refreshIfNeeded: false,
+        });
+        envFilePath = result.filePath;
+      }
+      const summary = summarizeAuthState(state);
+      if (options.json) {
+        console.log(JSON.stringify({ summary, authFile: options.authFile, envFile: envFilePath }, null, 2));
+      } else {
+        printAuthHuman(summary, { filePath: options.authFile, envFile: envFilePath, refreshed: true });
+      }
+    } catch (err) {
+      const message = err instanceof AuthError ? err.message : err?.message || String(err);
+      console.error(`auth refresh failed: ${message}`);
+      process.exitCode = 1;
+    }
+  });
+
+authCmd
+  .command("status")
+  .description("Inspect cached auth state. Auto-refreshes only if requested.")
+  .option("--auth-file <path>", "Override the persisted auth file path", AUTH_FILE_PATH)
+  .option("--auto-refresh", "Refresh the access token if it is near expiry", false)
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (options) => {
+    try {
+      let state = await loadAuthState({ filePath: options.authFile });
+      let refreshedThisRun = false;
+      if (options.autoRefresh) {
+        try {
+          const result = await getValidAccessToken({ filePath: options.authFile });
+          state = result.state;
+          refreshedThisRun = result.refreshed;
+        } catch (err) {
+          if (!(err instanceof AuthError) || err.code !== "NO_CACHE") throw err;
+        }
+      }
+      const summary = summarizeAuthState(state);
+      if (options.json) {
+        console.log(JSON.stringify({ summary, authFile: options.authFile, refreshed: refreshedThisRun }, null, 2));
+      } else {
+        printAuthHuman(summary, { filePath: options.authFile, refreshed: refreshedThisRun });
+      }
+      if (!summary.configured) process.exitCode = 1;
+    } catch (err) {
+      const message = err instanceof AuthError ? err.message : err?.message || String(err);
+      console.error(`auth status failed: ${message}`);
+      process.exitCode = 1;
+    }
+  });
+
+authCmd
+  .command("export")
+  .description("Write a shell-sourceable env file with the active bearer/refresh tokens.")
+  .argument("<env-file>", "Output path for the env file (e.g. ./.env.lovable)")
+  .option("--auth-file <path>", "Override the persisted auth file path", AUTH_FILE_PATH)
+  .option("--no-refresh", "Skip auto-refresh; export whatever is on disk")
+  .option("--json", "Print machine-readable JSON", false)
+  .action(async (envFile, options) => {
+    try {
+      const result = await writeEnvFile(envFile, {
+        authFilePath: options.authFile,
+        refreshIfNeeded: options.refresh !== false,
+      });
+      const summary = summarizeAuthState(result.state);
+      if (options.json) {
+        console.log(JSON.stringify({ envFile: result.filePath, summary }, null, 2));
+      } else {
+        printAuthHuman(summary, { filePath: options.authFile, envFile: result.filePath });
+      }
+    } catch (err) {
+      const message = err instanceof AuthError ? err.message : err?.message || String(err);
+      console.error(`auth export failed: ${message}`);
+      process.exitCode = 1;
+    }
+  });
+
+authCmd
+  .command("clear")
+  .description("Delete the cached auth file (next run will need `auth bootstrap` again).")
+  .option("--auth-file <path>", "Override the persisted auth file path", AUTH_FILE_PATH)
+  .action(async (options) => {
+    try {
+      await fs.rm(options.authFile, { force: true });
+      console.log(`Removed ${options.authFile}`);
+    } catch (err) {
+      console.error(`auth clear failed: ${err?.message || err}`);
       process.exitCode = 1;
     }
   });

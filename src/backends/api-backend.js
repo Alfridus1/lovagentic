@@ -27,6 +27,36 @@ export function resolveApiBackendConfig(options = {}) {
   };
 }
 
+/**
+ * If no env-provided credentials exist, fall back to the on-disk auth cache
+ * managed by `lovagentic auth bootstrap` / `auth refresh`. Returns an updated
+ * config object that now carries a valid bearer token, refreshing the cache
+ * when needed. Never overwrites credentials passed via options or env vars.
+ */
+async function fillCredentialsFromCache(config, options) {
+  if (config.hasApiKey || config.hasBearerToken) return config;
+  if (options.skipAuthCache) return config;
+  let getValidAccessToken;
+  try {
+    ({ getValidAccessToken } = await import("../auth.js"));
+  } catch {
+    return config;
+  }
+  try {
+    const { accessToken } = await getValidAccessToken({ filePath: options.authFile });
+    if (!accessToken) return config;
+    return {
+      ...config,
+      bearerToken: accessToken,
+      hasBearerToken: true,
+      configured: true,
+      source: "auth-cache",
+    };
+  } catch {
+    return config;
+  }
+}
+
 export function getApiBackendCapabilities() {
   return new Set([
     CAPABILITIES.AUTH_API_KEY,
@@ -54,12 +84,17 @@ export function getApiBackendCapabilities() {
 }
 
 export async function createApiBackend(options = {}) {
-  const config = resolveApiBackendConfig(options);
+  let config = resolveApiBackendConfig(options);
   if (config.hasApiKey && config.hasBearerToken) {
     throw new Error("Configure either LOVABLE_API_KEY or LOVABLE_BEARER_TOKEN, not both.");
   }
   if (!config.configured) {
-    throw new Error("LOVABLE_API_KEY or LOVABLE_BEARER_TOKEN is not set. Official Lovable API backend cannot be constructed.");
+    config = await fillCredentialsFromCache(config, options);
+  }
+  if (!config.configured) {
+    throw new Error(
+      "Lovable API auth not configured. Set LOVABLE_API_KEY (lov_...) or LOVABLE_BEARER_TOKEN, or run `lovagentic auth bootstrap`."
+    );
   }
 
   let LovableClient;

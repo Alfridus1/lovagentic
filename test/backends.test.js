@@ -35,12 +35,15 @@ test("explicit api backend fails closed without an API key", async () => {
   delete process.env.LOVABLE_API_KEY;
   delete process.env.LOVABLE_BEARER_TOKEN;
   try {
+    // skipAuthCache forces the backend to ignore the on-disk auth cache
+    // managed by `lovagentic auth bootstrap`, so this test asserts the pure
+    // env-only failure mode regardless of any developer's local cache.
     await assert.rejects(
-      () => createApiBackend({}),
-      /LOVABLE_API_KEY or LOVABLE_BEARER_TOKEN is not set/
+      () => createApiBackend({ skipAuthCache: true }),
+      /Lovable API auth not configured/
     );
     await assert.rejects(
-      () => getBackend({ backend: "api" }),
+      () => getBackend({ backend: "api", apiOptions: { skipAuthCache: true } }),
       /Configure LOVABLE_API_KEY/
     );
   } finally {

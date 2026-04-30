@@ -65,6 +65,25 @@ lovagentic list --json           # pure HTTPS, instant
 lovagentic prompt "..." "..."    # no browser launch
 ```
 
+No `lov_...` API key yet? Use the Firebase Bearer-token path that the
+Lovable web/desktop app uses internally. After signing in to Lovable Desktop
+or running `lovagentic login`, capture the refresh token once and let
+lovagentic keep a fresh Bearer on disk for you:
+
+```bash
+lovagentic import-desktop-session --profile-dir /tmp/lovagentic-profile
+lovagentic auth bootstrap \
+  --profile-dir /tmp/lovagentic-profile \
+  --out-env $HOME/.lovagentic/lovable.env
+
+lovagentic api --validate        # auto-uses the cached token
+```
+
+Optional: install a macOS LaunchAgent that refreshes the Bearer every
+50 minutes (see `scripts/launchd/install-auth-refresh.sh`). Full reference
+in [`docs/lovable-api.md`](docs/lovable-api.md) and per-endpoint detail in
+[`docs/lovable-api-reference.md`](docs/lovable-api-reference.md).
+
 ---
 
 ## Install

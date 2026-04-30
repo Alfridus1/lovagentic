@@ -18,6 +18,7 @@ Options:
 Commands:
   doctor [options]                                 Inspect the local Lovable desktop install, CLI profile, Node, and Playwright.
   api [options]                                    Inspect the official Lovable API SDK configuration and optionally validate the API key.
+  auth                                             Manage Lovable API authentication: bootstrap from a logged-in browser profile, refresh, inspect, and export.
   init [options]                                   Scaffold a .lovagentic.json config file, prompt templates, and .env.example in the current directory.
   import-desktop-session [options]                 Copy the desktop app session files into the CLI browser profile.
   login [options]                                  Open a persistent browser profile and wait for a Lovable session.
@@ -59,6 +60,7 @@ Commands:
 
 - [`doctor`](#doctor)
 - [`api`](#api)
+- [`auth`](#auth)
 - [`init`](#init)
 - [`import-desktop-session`](#import-desktop-session)
 - [`login`](#login)
@@ -126,6 +128,32 @@ Options:
                     visible workspaces (default: false)
   --json            Print machine-readable JSON (default: false)
   -h, --help        display help for command
+```
+
+## auth
+
+```text
+Usage: lovagentic auth [options] [command]
+
+Manage Lovable API authentication: bootstrap from a logged-in browser profile,
+refresh, inspect, and export.
+
+Options:
+  -h, --help                   display help for command
+
+Commands:
+  bootstrap [options]          Extract Firebase auth state from a logged-in
+                               browser profile and store it for refresh-driven
+                               token rotation.
+  refresh [options]            Force a token refresh using the cached refresh
+                               token.
+  status [options]             Inspect cached auth state. Auto-refreshes only if
+                               requested.
+  export [options] <env-file>  Write a shell-sourceable env file with the active
+                               bearer/refresh tokens.
+  clear [options]              Delete the cached auth file (next run will need
+                               `auth bootstrap` again).
+  help [command]               display help for command
 ```
 
 ## init
