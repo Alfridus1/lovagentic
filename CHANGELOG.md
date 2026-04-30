@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-04-30
+
+### Changed
+
+- `lovagentic doctor` now reflects the real auth state instead of just env vars. The `Lovable API auth` row reports the active source (`env-api-key` / `env-bearer` / `auth-cache`), the email associated with the cached state, and the access-token's minutes-remaining when the cache is in use. A separate `Lovable auth refresh agent` row reports whether the macOS LaunchAgent at `~/Library/LaunchAgents/com.lovagentic.auth-refresh.plist` is installed, with a concrete install hint when it is missing. The MCP-backend hint no longer points at "v0.2" — the API backend has covered the common cases for several minor versions.
+
 ## [0.3.3] - 2026-04-30
 
 ### Added

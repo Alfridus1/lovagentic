@@ -230,10 +230,49 @@ async function runDoctorChecks({ profileDir, desktopProfileDir }) {
 
   const pwStatus = await detectPlaywright();
   const lovableSdkVersion = getInstalledPackageVersion("@lovable.dev/sdk");
+  let authCacheState = null;
+  try {
+    authCacheState = await loadAuthState();
+  } catch {
+    authCacheState = null;
+  }
+  const authCacheUsable = Boolean(
+    authCacheState?.refreshToken && authCacheState?.firebaseApiKey
+  );
+  const authCacheSummary = authCacheUsable ? summarizeAuthState(authCacheState) : null;
+  const apiKeyEnvSet = Boolean(process.env.LOVABLE_API_KEY);
+  const bearerEnvSet = Boolean(process.env.LOVABLE_BEARER_TOKEN);
+  const apiAuthSource = apiKeyEnvSet
+    ? "env-api-key"
+    : bearerEnvSet
+      ? "env-bearer"
+      : authCacheUsable
+        ? "auth-cache"
+        : null;
+  const launchAgentInstalled = (() => {
+    try {
+      const plistPath = path.join(
+        os.homedir(),
+        "Library",
+        "LaunchAgents",
+        "com.lovagentic.auth-refresh.plist"
+      );
+      return statSync(plistPath).isFile();
+    } catch {
+      return false;
+    }
+  })();
   const api = {
-    configured: Boolean(process.env.LOVABLE_API_KEY || process.env.LOVABLE_BEARER_TOKEN),
-    apiKeyConfigured: Boolean(process.env.LOVABLE_API_KEY),
-    bearerTokenConfigured: Boolean(process.env.LOVABLE_BEARER_TOKEN),
+    configured: Boolean(apiKeyEnvSet || bearerEnvSet || authCacheUsable),
+    apiKeyConfigured: apiKeyEnvSet,
+    bearerTokenConfigured: bearerEnvSet,
+    authCacheConfigured: authCacheUsable,
+    authSource: apiAuthSource,
+    authFile: AUTH_FILE_PATH,
+    authEmail: authCacheSummary?.email || null,
+    accessTokenSecondsRemaining: authCacheSummary?.accessTokenSecondsRemaining ?? null,
+    accessTokenExpiresAt: authCacheSummary?.accessTokenExpiresAt || null,
+    launchAgentInstalled,
     baseUrl: process.env.LOVABLE_API_BASE_URL || "https://api.lovable.dev",
     sdkVersion: lovableSdkVersion
   };
@@ -252,10 +291,37 @@ async function runDoctorChecks({ profileDir, desktopProfileDir }) {
     { key: "playwright", label: `Playwright (${pwStatus.version ?? "not installed"})`, ok: pwStatus.installed, healable: false, hint: pwStatus.installed ? null : "Run `npm install` in the lovagentic repo, or install the npm package." },
     { key: "chromium", label: "Playwright Chromium binary", ok: pwStatus.chromium, healable: true, hint: pwStatus.chromium ? null : "Run `npx playwright install chromium`, or `lovagentic doctor --self-heal`." },
     { key: "lovableApiSdk", label: `Lovable API SDK (@lovable.dev/sdk ${lovableSdkVersion ?? "not installed"})`, ok: Boolean(lovableSdkVersion), healable: false, hint: lovableSdkVersion ? null : "Run `npm install @lovable.dev/sdk` to enable the official API backend scaffold." },
-    { key: "lovableApiAuth", label: `Lovable API auth (${api.configured ? "configured" : "not configured"})`, ok: true, healable: false, hint: api.configured ? "Official API backend can be used for supported capabilities." : "Set LOVABLE_API_KEY=lov_... once Lovable grants API access. Browser backend remains the fallback." },
+    {
+      key: "lovableApiAuth",
+      label: api.configured
+        ? `Lovable API auth (configured, source: ${api.authSource}${api.authEmail ? `, ${api.authEmail}` : ""}${
+            api.authSource === "auth-cache" && api.accessTokenSecondsRemaining != null
+              ? `, ${Math.max(0, Math.floor(api.accessTokenSecondsRemaining / 60))}m left`
+              : ""
+          })`
+        : "Lovable API auth (not configured)",
+      ok: true,
+      healable: false,
+      hint: api.configured
+        ? api.authSource === "auth-cache"
+          ? `Using cached refresh-token at ${api.authFile}. Run \`lovagentic auth refresh\` to mint a new bearer; install the LaunchAgent (scripts/launchd/install-auth-refresh.sh) for hands-off rotation.`
+          : "Official API backend is ready (env credentials)."
+        : "No Lovable API auth available. Set LOVABLE_API_KEY=lov_... or run `lovagentic auth bootstrap` after signing in to Lovable Desktop."
+    },
+    {
+      key: "lovableAuthRefresh",
+      label: api.launchAgentInstalled
+        ? "Lovable auth refresh agent (installed)"
+        : "Lovable auth refresh agent (not installed)",
+      ok: true,
+      healable: false,
+      hint: api.launchAgentInstalled
+        ? "LaunchAgent rotates the bearer every 50 minutes and rewrites ~/.lovagentic/lovable.env."
+        : "Optional. Run `./scripts/launchd/install-auth-refresh.sh` (macOS) or schedule `lovagentic auth refresh --out-env <path>` every ~50 minutes (Linux/CI cron) for hands-off token rotation."
+    },
     { key: "lovableReachable", label: `lovable.dev reachable${network.lovable.ms != null ? ` (${network.lovable.ms}ms)` : ""}`, ok: network.lovable.ok, healable: false, hint: network.lovable.ok ? null : `Cannot reach https://lovable.dev (${network.lovable.error ?? "unknown error"}). Check internet connection or corporate proxy.` },
     { key: "npmReachable", label: `npm registry reachable${network.npm.ms != null ? ` (${network.npm.ms}ms)` : ""}`, ok: network.npm.ok, healable: false, hint: network.npm.ok ? null : `Cannot reach registry.npmjs.org (${network.npm.error ?? "unknown error"}). Required for self-update checks.` },
-    { key: "mcp", label: `MCP backend (${mcpConfigured ? "configured" : "not configured"})`, ok: true, healable: false, hint: mcpConfigured ? null : "LOVABLE_MCP_URL not set. Using browser backend. MCP support ships in v0.2." }
+    { key: "mcp", label: `MCP backend (${mcpConfigured ? "configured" : "not configured"})`, ok: true, healable: false, hint: mcpConfigured ? null : "LOVABLE_MCP_URL not set. Using browser/API backend. The CLI's official-API path covers most data flows without an MCP backend." }
   ];
 
   return { checks, playwrightDefaultDir, api };
