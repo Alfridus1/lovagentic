@@ -1,6 +1,6 @@
 {
   "name": "lovagentic",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Agentic CLI for Lovable.dev — agents in, apps out. Send prompts, verify builds, fix errors, and publish from the terminal.",
   "type": "module",
   "license": "MIT",
