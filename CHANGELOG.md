@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-30
+
+### Fixed
+
+- `lovagentic runbook` now persists snapshot/diff artifacts even when a step omits an explicit `output:`. When the runbook has any output directory (auto-generated under `output/runbooks/<name-timestamp>` by default), each snapshot/diff step writes a `<step-slug>.json` file there and the human summary now prints the resolved output path per step. Previously the steps ran successfully but silently dropped their JSON.
+- `lovagentic list` now respects API-cache auth (`~/.lovagentic/auth.json`) for backend selection, not just `LOVABLE_API_KEY`/`LOVABLE_BEARER_TOKEN`. Added `--workspace <id>`, `--all-workspaces`, `--projects-only`, `--sort-by`, and `--sort-order` flags so callers can list raw API project arrays without going through the dashboard scrape. The new direct rendering prints id, display name, status, edit count, last-edited timestamp, and live URL per project.
+
+### Changed
+
+- `docs/lovable-api-reference.md` and `docs/lovable-api.md` updated with corrections from a full live recon against `api.lovable.dev`. Highlights: `GET /v1/projects/{pid}` is slimmer than the list-item shape, `/edits` items carry no diff metadata, `/git/files` is flat with `{path, size, binary}` only, `/git/diff` uses `diffs` (not `entries`) with `{action, file_path, file_type, is_image, hunks}` and camelCase hunk fields, `/database` returns just `{ enabled: bool }`, `/v1/workspaces/{wsId}` wraps the workspace as `{ workspace, current_member }`, `POST /messages` returns `{message_id, status}` (no `ai_message_id`), and `GET /messages` (LIST) is unsupported. Visibility-toggle to `draft` is plan-gated; there is no `DELETE /v1/projects/{pid}` endpoint. `/v1/_dev/...` routes require `lov_...` API keys (Bearer rejected).
+
 ## [0.3.0] - 2026-04-30
 
 ### Added

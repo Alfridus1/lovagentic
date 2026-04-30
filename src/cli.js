@@ -2,7 +2,7 @@
 
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -877,14 +877,36 @@ program
   .option("--poll-ms <ms>", "Polling interval while waiting for the dashboard feed", parseInteger, 250)
   .option("--page-size <n>", "Pagination size for dashboard project requests", parseInteger, 100)
   .option("--limit <n>", "Limit human-readable rows; JSON output still includes all projects", parseInteger)
+  .option("--workspace <id>", "Restrict the API list to a specific workspace id (skips the dashboard wrapper)")
+  .option("--all-workspaces", "Aggregate projects across every visible workspace (API backend only)", false)
+  .option("--projects-only", "Print just the project list (skip the workspace menu wrapper)", false)
+  .option("--sort-by <field>", "Sort projects on the API. last_edited_at | created_at | last_viewed_at", "last_edited_at")
+  .option("--sort-order <dir>", "Sort direction: asc or desc", "desc")
   .option("--backend <kind>", "Backend for supported flows: auto, browser, or api", "auto")
   .option("--json", "Print the extracted dashboard state as JSON", false)
   .action(async (options) => {
     const apiBackend = await createApiBackendForCommand(options);
     if (apiBackend) {
-      const result = await apiBackend.listProjects({
-        limit: options.pageSize
-      });
+      const params = {
+        limit: options.pageSize,
+        sort_by: options.sortBy,
+        sort_order: options.sortOrder
+      };
+      if (options.workspace) params.workspaceId = options.workspace;
+
+      const result = await apiBackend.listProjects(params);
+
+      if (options.projectsOnly || options.workspace || options.allWorkspaces) {
+        // Direct project listing: no dashboard wrapper, just the array Lovable
+        // returned, with workspace metadata if available.
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+          return;
+        }
+        printProjectList(result, { limit: options.limit });
+        return;
+      }
+
       const state = buildDashboardStateFromApi(result);
       if (options.json) {
         console.log(JSON.stringify(state, null, 2));
@@ -3520,8 +3542,22 @@ function normalizeBackendChoice(value = "auto") {
   return normalized;
 }
 
+// `auto` backend should pick the official API whenever any usable credential
+// exists, including a refresh-token cache produced by `lovagentic auth
+// bootstrap`. We avoid awaiting auth.json reads here because this is called
+// frequently and synchronously; instead we do a cheap fs check and trust the
+// API backend to return a useful error if the cache is invalid.
 function hasOfficialApiAuth() {
-  return Boolean(process.env.LOVABLE_API_KEY || process.env.LOVABLE_BEARER_TOKEN);
+  if (process.env.LOVABLE_API_KEY || process.env.LOVABLE_BEARER_TOKEN) {
+    return true;
+  }
+  try {
+    const stat = statSync(AUTH_FILE_PATH);
+    if (stat?.isFile()) return true;
+  } catch {
+    // ignore
+  }
+  return false;
 }
 
 async function createApiBackendForCommand(options = {}) {
@@ -3924,8 +3960,12 @@ async function executeRunbookStep({
       edits: step.edits !== false,
       mcp: Boolean(step.mcp)
     });
-    const outputPath = step.output
-      ? await writeJsonFile(resolveRunbookArtifactPath(step.output, outputDir), snapshot)
+    // Persist the snapshot. If the step did not specify an explicit `output`,
+    // fall back to a default path inside the runbook's output dir so artifacts
+    // are never silently dropped on disk.
+    const snapshotOutputPath = resolveRunbookStepDefaultOutput(step, outputDir, "snapshot");
+    const outputPath = snapshotOutputPath
+      ? await writeJsonFile(snapshotOutputPath, snapshot)
       : null;
     return {
       projectId: snapshot.projectId,
@@ -3955,8 +3995,9 @@ async function executeRunbookStep({
       latest: Boolean(step.latest) || (!step.messageId && !step.sha && !lastCommitSha)
     });
 
-    const outputPath = step.output
-      ? await writeJsonFile(resolveRunbookArtifactPath(step.output, outputDir), diffState)
+    const diffOutputPath = resolveRunbookStepDefaultOutput(step, outputDir, "diff");
+    const outputPath = diffOutputPath
+      ? await writeJsonFile(diffOutputPath, diffState)
       : null;
     return {
       params: diffState.params,
@@ -4173,6 +4214,20 @@ function resolveRunbookArtifactPath(value, outputDir) {
     throw new Error("Output path cannot be empty.");
   }
   return path.isAbsolute(target) ? target : path.join(outputDir, target);
+}
+
+// Resolve a default output path for steps that produce JSON artifacts so they
+// always land on disk. Honors an explicit `step.output`; otherwise falls back
+// to `<outputDir>/<step-slug>.json` when an outputDir is set; returns null
+// when neither is available (no persistence requested at all).
+function resolveRunbookStepDefaultOutput(step, outputDir, defaultBasename) {
+  if (step?.output) {
+    return resolveRunbookArtifactPath(step.output, outputDir);
+  }
+  if (!outputDir) return null;
+  const slug = slugifyRunbookStepName(step?.name) || defaultBasename;
+  const filename = slug.endsWith(".json") ? slug : `${slug}.json`;
+  return path.join(outputDir, filename);
 }
 
 function resolveRunbookStepOutputDir(step, outputDir) {
@@ -5064,6 +5119,35 @@ function printSpeedState(state) {
     console.log(`[${audit.device}] performance=${audit.scores.performance ?? "n/a"} accessibility=${audit.scores.accessibility ?? "n/a"} best-practices=${audit.scores.bestPractices ?? "n/a"} seo=${audit.scores.seo ?? "n/a"}`);
     console.log(`  report: ${audit.reportPath}`);
   });
+}
+
+// Direct, project-first listing — used when the caller asked for raw
+// project data via --workspace / --all-workspaces / --projects-only.
+function printProjectList(result, { limit } = {}) {
+  const projects = Array.isArray(result?.projects) ? result.projects : [];
+  const total = result?.total ?? projects.length;
+  const hasMore = result?.has_more === true;
+  const workspaceCount = Array.isArray(result?.workspaces) ? result.workspaces.length : null;
+
+  if (workspaceCount != null) {
+    console.log(`Workspaces queried: ${workspaceCount}`);
+  }
+  console.log(`Projects: ${projects.length}${total > projects.length ? ` of ${total}` : ""}${hasMore ? " (has_more)" : ""}`);
+
+  const cap = typeof limit === "number" && Number.isFinite(limit) && limit > 0 ? limit : projects.length;
+  const visible = projects.slice(0, cap);
+  for (const p of visible) {
+    const id = p.id || "(no-id)";
+    const name = p.display_name || p.name || "(unnamed)";
+    const status = p.status || "?";
+    const pub = p.is_published ? "published" : "draft";
+    const url = p.url || "";
+    const last = (p.last_edited_at || p.updated_at || "").slice(0, 10);
+    console.log(`  ${id}  ${name}  [${status}/${pub}]  edits=${p.edit_count ?? "?"}  last=${last}${url ? "  " + url : ""}`);
+  }
+  if (visible.length < projects.length) {
+    console.log(`  … +${projects.length - visible.length} more (use --limit to show)`);
+  }
 }
 
 function printDashboardState(state, {

@@ -442,9 +442,13 @@ The new project initially has `status: "in_progress"`. Wait for it via
 | **Auth** | required |
 | **SDK** | `client.getProject(pid)` |
 
-Returns a single `ProjectResponse`. Same shape as one entry from the project
-list, but always includes the latest values (idle list endpoints can lag a
-few seconds).
+Returns a slim `ProjectResponse`. **Important**: the wire shape is
+intentionally smaller than items returned from the project list — see
+[Appendix D](#appendix-d-corrections-from-live-testing) for the actual fields.
+If you need aggregate fields like `tech_stack`, `edit_count`, `created_at`,
+`last_edited_at`, etc., use `GET /v1/workspaces/{wsId}/projects` and filter
+by id. The single-get always carries `latest_commit_sha` and
+`latest_screenshot_url`.
 
 ---
 
@@ -535,14 +539,21 @@ Use the returned `id` as `template_id` / `library_id` when calling
 }
 ```
 
-**Response 200 — `SendMessageResponse`**
+**Response 200 — real shape**
 
 ```jsonc
-{ "message_id": "msg_…", "ai_message_id": "msg_…" }
+{
+  "$schema":   "https://api.lovable.dev/V1SendMessageOutputBody.json",
+  "message_id": "umsg_…",
+  "status":     "accepted"
+}
 ```
 
-Both ids are present. The `ai_message_id` is the placeholder for the
-upcoming AI response; you poll it with `getMessage` until it resolves.
+Only the user-message id is returned. The assistant message id is created
+asynchronously — use `client.waitForResponse(pid)` (or poll the project's
+latest message) to obtain it. The SDK exposes the same payload with keys
+remapped to camelCase (`messageId`, `aiMessageId` is *not* populated until
+the assistant message exists).
 
 ---
 
@@ -635,9 +646,9 @@ Optional query params: `limit`, `offset`, `since` (ISO timestamp).
 GET /v1/projects/{pid}/git/files?ref=abc123&path=src/&limit=200
 ```
 
-Returns `{ files: GitFileEntry[] }` with each entry being
-`{ path, type: "file" | "dir", size?, sha? }`. Without `path`, lists from
-repo root.
+Returns `{ files: GitFileEntry[], ref }` with each entry being
+`{ path, size, binary }` — no directory entries, no sha. The list is
+flat across the entire tree at `ref`. Without `path`, lists from repo root.
 
 ### `GET /v1/projects/{pid}/git/file`
 
@@ -656,28 +667,26 @@ GET /v1/projects/{pid}/git/diff?from=…&to=…        # arbitrary range
 GET /v1/projects/{pid}/git/diff?message_id=msg_…   # diff produced by a chat turn
 ```
 
-**Response — `GitDiffResponse`**
+**Real wire shape** — top-level uses `diffs` (not `entries`), and entries have
+a different field set than the SDK type suggests:
 
 ```jsonc
 {
-  "from_ref": "abc123",
-  "to_ref":   "def456",
-  "entries": [
+  "$schema": "https://api.lovable.dev/V1DiffResponse.json",
+  "diffs": [
     {
-      "path": "src/components/Navbar.tsx",
-      "old_path": null,
-      "kind": "modified" | "added" | "deleted" | "renamed",
-      "lines_added": 12,
-      "lines_removed": 1,
+      "action":    "edit",
+      "file_path": "src/routes/index.tsx",
+      "file_type": "tsx",
+      "is_image":  false,
       "hunks": [
         {
-          "header": "@@ -10,3 +10,12 @@",
-          "old_start": 10, "old_lines": 3,
-          "new_start": 10, "new_lines": 12,
+          "oldStart": 13, "oldCount": 9,
+          "newStart": 13, "newCount": 14,
           "lines": [
-            { "kind": "context",  "text": "<header>" },
-            { "kind": "removed",  "text": "  <h1>App</h1>" },
-            { "kind": "added",    "text": "  <h1 className=\"dark:text-white\">App</h1>" }
+            { "type": "context", "content": "      }}" },
+            { "type": "remove",  "content": "      <h1 …>" },
+            { "type": "add",     "content": "      <div …>" }
           ]
         }
       ]
@@ -685,6 +694,9 @@ GET /v1/projects/{pid}/git/diff?message_id=msg_…   # diff produced by a chat t
   ]
 }
 ```
+
+Supported query parameters: `?sha=<commit_sha>`, `?message_id=<id>`,
+`?latest=true`. **Not** supported: `?from=<sha>&to=<sha>`, `?ref=<sha>`.
 
 ---
 
@@ -725,15 +737,19 @@ on plans that include backend hosting.
 
 ### `GET /v1/projects/{pid}/database`
 
+**Real wire shape** is just `{ enabled: bool }`:
+
 ```jsonc
 {
-  "is_enabled": true,
-  "status": "active",
-  "region": "eu-central",
-  "size_bytes": 1842716,
-  "tables": 5
+  "$schema": "https://api.lovable.dev/V1GetDatabaseStatusOutputBody.json",
+  "enabled": true
 }
 ```
+
+When the database is enabled, call `connection-info` for credentials and the
+`/database/query` endpoint to introspect tables. The richer shape
+(`status`, `region`, `size_bytes`, `tables`) shown in earlier drafts of these
+docs reflects the SDK type, not the live wire response.
 
 ### `POST /v1/projects/{pid}/database/enable`
 
@@ -1513,4 +1529,196 @@ console.log("New project:", projectId);
 
 ---
 
-_Last verified against production: 2026-04-30._
+_Last verified against production: 2026-04-30 (full live recon, see corrections below)._
+
+---
+
+## Appendix D: corrections from live testing
+
+The initial draft of this reference was assembled from `@lovable.dev/sdk@0.1.5`'s
+`dist/index.d.ts`. A full live recon against `api.lovable.dev` revealed several
+places where the wire shape diverges from the SDK types or from the README.
+When they conflict, **trust the wire shape below**.
+
+### `GET /v1/projects/{pid}` returns a slimmer `ProjectResponse`
+
+The single-project read does not include the aggregate fields surfaced in the
+list response. The real wire shape is:
+
+```jsonc
+{
+  "$schema": "https://api.lovable.dev/V1ProjectResponse.json",
+  "id":            "86fb9a69-…",
+  "workspace_id":  "workspace_…",
+  "display_name":  "Agent Smoke Check",
+  "description":   "…",
+  "status":        "completed",
+  "visibility":    "private",
+  "is_published":  false,
+  "latest_commit_sha":      "54ea9557…",
+  "latest_screenshot_url":  "https://screenshot2.lovable.dev/…"
+}
+```
+
+Fields like `tech_stack`, `edit_count`, `created_at`, `updated_at`,
+`last_edited_at`, `last_viewed_at`, `user_*`, `app_visitors_*`, and
+`trending_score` exist **only on items in the project list response**, not on
+the single-project read. If you need them, call
+`GET /v1/workspaces/{wsId}/projects` and filter by `id` instead.
+
+### `GET /v1/projects/{pid}/edits` items are minimal
+
+Real item shape (no diff metadata):
+
+```jsonc
+{
+  "id":             "edt-…",
+  "type":           "ai_update",
+  "commit_sha":     "e7b885e4…",
+  "commit_message": "Showed \"lovagentic API works ✅",
+  "status":         "completed",
+  "created_at":     "2026-04-30T20:25:56Z"
+}
+```
+
+There are **no** `summary`, `files_changed`, `lines_added`, or `lines_removed`
+fields. Use `GET /v1/projects/{pid}/git/diff?sha=<commit_sha>` to inspect what
+an edit actually changed.
+
+### `GET /v1/projects/{pid}/git/files` is flat and file-only
+
+Real item shape:
+
+```jsonc
+{ "path": ".gitignore", "size": 334, "binary": false }
+```
+
+There is no `type`/`kind` field and no directory entries — the response is a
+flat list of files at the requested ref. Top-level keys are
+`{ "$schema", "files", "ref" }`.
+
+### `GET /v1/projects/{pid}/git/diff` real shape
+
+Query parameters that work in production:
+
+* `?sha=<commit_sha>` — diff between the commit and its parent.
+* `?message_id=<message_id>` — diff produced by a specific chat turn.
+* `?latest=true` — latest commit's diff.
+
+`?from=<sha>&to=<sha>` and `?ref=<sha>` are **not** supported and currently
+respond with an error envelope `{ type, message, details }`.
+
+Response top-level uses `diffs`, not `entries`:
+
+```jsonc
+{
+  "$schema": "https://api.lovable.dev/V1DiffResponse.json",
+  "diffs": [
+    {
+      "action":    "edit" | "add" | "delete" | "rename",
+      "file_path": "src/routes/index.tsx",
+      "file_type": "tsx",
+      "is_image":  false,
+      "hunks": [
+        {
+          "oldStart": 13, "oldCount": 9,
+          "newStart": 13, "newCount": 14,
+          "lines": [
+            { "type": "context", "content": "      }}" },
+            { "type": "remove",  "content": "      <h1 …>" },
+            { "type": "add",     "content": "      <div …>" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Note: hunk fields are camelCase (`oldStart`, `newStart`), and lines use
+`{ type, content }`, not `{ kind, text }`.
+
+### `GET /v1/projects/{pid}/database` real shape
+
+```jsonc
+{ "$schema": "…", "enabled": false }
+```
+
+Not `is_enabled`/`status`/`region`/`size_bytes`. When the database is enabled,
+Lovable currently still returns just `{ "enabled": true }` from this endpoint;
+run `GET /v1/projects/{pid}/database/connection-info` for credentials and the
+`/database/query` endpoint to introspect tables.
+
+### `GET /v1/workspaces/{wsId}` wraps the workspace
+
+Unlike the `GET /v1/workspaces` list endpoint, the single-workspace read wraps
+the object and adds the caller's membership row:
+
+```jsonc
+{
+  "$schema": "https://api.lovable.dev/GetUserWorkspaceBody.json",
+  "workspace": { /* WorkspaceWithMembership without the membership field */ },
+  "current_member": {
+    "user_id":      "A74…",
+    "username":     "alfridus",
+    "role":         "owner",
+    "email":        "…",
+    "display_name": "Tobi",
+    "invited_at":   "…",
+    "joined_at":    "…"
+  }
+}
+```
+
+The SDK's `client.getWorkspace()` returns the unwrapped `WorkspaceWithMembership`
+for compatibility, so prefer the SDK if you do not need the wrapper.
+
+### `POST /v1/projects/{pid}/messages` response
+
+Real response is async-style:
+
+```jsonc
+{
+  "$schema": "https://api.lovable.dev/V1SendMessageOutputBody.json",
+  "message_id": "umsg_…",
+  "status":     "accepted"
+}
+```
+
+The SDK's `client.chat()` returns this shape with the keys remapped to
+`messageId`. The previously documented `ai_message_id` field does not appear
+in the `POST /messages` response — you receive only the user-message id.
+Poll `GET /v1/projects/{pid}/messages/{mid}` (or `client.waitForResponse()`)
+to observe the assistant message id once Lovable creates it.
+
+### `GET /v1/projects/{pid}/messages` is **not** supported
+
+There is no list endpoint for chat messages. The route returns HTTP 405. To
+inspect an individual message, call
+`GET /v1/projects/{pid}/messages/{message_id}`. The SDK exposes this as
+`client.getMessage()`.
+
+### `PUT /v1/projects/{pid}/visibility` is plan-gated
+
+Flipping a personal project to `draft` fails with HTTP 402-style error:
+
+```
+{ "type": "forbidden",
+  "message": "Personal projects require a Business or Enterprise plan." }
+```
+
+Personal/Pro plans can flip between `private` and `public`, but `draft` is
+locked to higher tiers. There is also no `DELETE /v1/projects/{pid}` endpoint
+at all — deleting a project is currently UI-only.
+
+### Auth caveats
+
+* `/v1/_dev/...` endpoints reject Bearer tokens with HTTP 403
+  `dev_api_key_required`. They require a `Lovable-API-Key: lov_…` credential.
+* `Lovable-API-Key:` is **not** accepted on the internal
+  `https://lovable.dev/...` surface; use a Bearer there.
+
+_If you find further wire-vs-doc drift, please file an issue against
+[`Alfridus1/lovagentic`](https://github.com/Alfridus1/lovagentic/issues). The
+docs in this repo are derived from live recon, not from a stable upstream
+schema._

@@ -229,6 +229,16 @@ Options:
                                 (default: 100)
   --limit <n>                   Limit human-readable rows; JSON output still
                                 includes all projects
+  --workspace <id>              Restrict the API list to a specific workspace id
+                                (skips the dashboard wrapper)
+  --all-workspaces              Aggregate projects across every visible
+                                workspace (API backend only) (default: false)
+  --projects-only               Print just the project list (skip the workspace
+                                menu wrapper) (default: false)
+  --sort-by <field>             Sort projects on the API. last_edited_at |
+                                created_at | last_viewed_at (default:
+                                "last_edited_at")
+  --sort-order <dir>            Sort direction: asc or desc (default: "desc")
   --backend <kind>              Backend for supported flows: auto, browser, or
                                 api (default: "auto")
   --json                        Print the extracted dashboard state as JSON

@@ -453,3 +453,38 @@ The cron'd `auth refresh --out-env` rewrites the env file every 50 minutes.
 Other shells that already sourced it have the old token. Either re-source on
 demand or read `~/.lovagentic/auth.json` at call time and trust the
 auto-refresh.
+
+---
+
+## Live-verified vs SDK-typed shapes
+
+The initial draft of these docs was assembled from `@lovable.dev/sdk@0.1.5`
+(`dist/index.d.ts`). A full live recon against `api.lovable.dev` revealed
+several places where the wire shape diverges from the SDK types. Treat the
+**wire shape** as the source of truth.
+
+Full list of corrections lives in
+[`docs/lovable-api-reference.md` Appendix D](./lovable-api-reference.md#appendix-d-corrections-from-live-testing).
+Highlights:
+
+- `GET /v1/projects/{pid}` returns a slim payload — no `tech_stack`,
+  `created_at`, `edit_count`, etc. Those live only on items in the project
+  list response.
+- `GET /v1/projects/{pid}/edits` items have only `{id, type, commit_sha,
+  commit_message, status, created_at}`. No diff metadata.
+- `GET /v1/projects/{pid}/git/files` is flat and file-only:
+  `{path, size, binary}`. No directory entries, no shas.
+- `GET /v1/projects/{pid}/git/diff` top-level uses `diffs`, not `entries`.
+  Items use `{action, file_path, file_type, is_image, hunks}` and hunks use
+  camelCase (`oldStart`/`newStart`).
+- `GET /v1/projects/{pid}/database` returns just `{ enabled: bool }`.
+- `GET /v1/workspaces/{wsId}` wraps the workspace as
+  `{ workspace, current_member }`.
+- `POST /v1/projects/{pid}/messages` returns `{message_id, status:
+  "accepted"}` (no `ai_message_id`). Use `getMessage` / `waitForResponse` to
+  observe the assistant turn.
+- `GET /v1/projects/{pid}/messages` (LIST) is not supported. Single-get works.
+- Visibility-toggle to `draft` is plan-gated (Business/Enterprise only).
+- No `DELETE /v1/projects/{pid}` endpoint exists; deletion is UI-only.
+- `/v1/_dev/...` endpoints reject Firebase Bearer tokens; they require a
+  `Lovable-API-Key: lov_…` credential.
