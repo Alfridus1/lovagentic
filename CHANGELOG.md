@@ -6,11 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-30
+
 ### Added
 
-- Added API-only `snapshot`, `diff`, and `runbook` commands. `snapshot` captures project state, URLs, knowledge, file trees, edit history, and optional file contents/MCP inventory. `diff` reads Lovable git diffs by message id, commit sha, or latest edit. `runbook` executes YAML/JSON orchestration steps for `snapshot`, `prompt`/`fix`, `wait`, `verify`, `diff`, and `publish`.
-- Added `src/api-ops.js` and `src/runbook.js` so API snapshot/diff and runbook parsing logic can be tested outside the Commander entrypoint.
-- Added regression tests for API diff summarization/latest-edit resolution and YAML/JSON runbook normalization/planning.
+- New `auth` command group for managing Lovable API authentication without a `lov_...` API key. `auth bootstrap` extracts the Firebase refresh token from a logged-in browser profile (IndexedDB `firebaseLocalStorageDb`), persists it at `~/.lovagentic/auth.json` (mode 0600), and validates it by minting a fresh Bearer once. `auth refresh` swaps refresh tokens for new id tokens via Google's public Secure Token endpoint without launching a browser. `auth status`, `auth export`, and `auth clear` round out the lifecycle. The CLI flag is `--out-env` rather than `--env-file` because Node 20+ intercepts `--env-file=...` for its own dotenv loader before the script ever sees it.
+- `src/auth.js` module with `extractFromProfile`, `refreshAccessToken`, `bootstrapFromProfile`, `refreshCached`, `getValidAccessToken`, and `writeEnvFile` helpers reusable from runbooks and from the API backend.
+- `scripts/launchd/` macOS LaunchAgent template plus install/uninstall helpers that run `lovagentic auth refresh --out-env <path>` every 50 minutes (and on each login). The installer resolves symlinks to a real script path so `launchctl` does not pass arguments to `node` through a fragile shebang resolver.
+- `scripts/extract-firebase-refresh.mjs` standalone helper that prints the Firebase auth state as JSON, useful when debugging the bootstrap flow.
+- Comprehensive Lovable API documentation. `docs/lovable-api.md` covers the auth model, both API surfaces (`api.lovable.dev/v1/*` and the internal `lovable.dev/...` surface), refresh strategy, security notes, and troubleshooting. `docs/lovable-api-reference.md` walks every public endpoint with method, path, headers, request/response schemas, real example payloads, and operational notes — 42 endpoints catalogued, plus a TS-style type catalogue and end-to-end recipes for chat-and-wait, snapshot, publish, SQL, and remix.
+- API-only `snapshot`, `diff`, and `runbook` commands. `snapshot` captures project state, URLs, knowledge, file trees, edit history, and optional file contents/MCP inventory. `diff` reads Lovable git diffs by message id, commit sha, or latest edit. `runbook` executes YAML/JSON orchestration steps for `snapshot`, `prompt`/`fix`, `wait`, `verify`, `diff`, and `publish`.
+- `src/api-ops.js` and `src/runbook.js` so API snapshot/diff and runbook parsing logic can be tested outside the Commander entrypoint.
+- Regression tests for API diff summarization/latest-edit resolution and YAML/JSON runbook normalization/planning.
+
+### Changed
+
+- The API backend transparently falls back to the on-disk auth cache managed by `auth bootstrap`/`auth refresh` when neither `LOVABLE_API_KEY` nor `LOVABLE_BEARER_TOKEN` is set in the environment. Tests pass `skipAuthCache: true` to preserve the env-only failure mode. The `api --validate` command now reports which credential source it actually used (`env-api-key`, `env-bearer`, or `auth-cache`).
+- Refreshed README guidance to surface the Bearer-token bootstrap path next to the existing `lov_...` flow, with links into the new docs.
 - Clarified docs after reviewing Lovable's `llms-full.txt`: the public Lovable API docs currently position `Build with URL` as the first documented API release, so key-backed SDK flows are described as preview/availability-gated rather than a complete public API replacement for browser automation.
 
 ## [0.2.0] - 2026-04-21
