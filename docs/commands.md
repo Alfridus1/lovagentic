@@ -1097,8 +1097,8 @@ Options:
   --no-knowledge    Skip project and workspace knowledge
   --no-edits        Skip edit history
   --no-database     Skip the database status probe
-  --mcp             Include workspace MCP servers/connectors/catalog (default:
-                    false)
+  --mcp             Include workspace connectors, MCP connector status, and
+                    connector catalog (default: false)
   --output <path>   Write the full snapshot JSON to this path
   --json            Print the full snapshot JSON (default: false)
   -h, --help        display help for command

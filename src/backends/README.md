@@ -72,7 +72,7 @@ Current API-backed capability groups:
 - publish and published URL polling
 - project/workspace knowledge
 - code file listing, file reads, diffs, edit history
-- MCP server/connector catalog reads and MCP server CRUD
+- workspace connector reads, available connector catalog, and custom MCP connector CRUD
 - analytics reads
 - Lovable Cloud database status/provision/query helpers
 

@@ -165,7 +165,7 @@ Lovable-API-Key:  lov_...
 
 (Pick exactly one — sending both is rejected by the SDK constructor.)
 
-Endpoints we have reproduced from the v0.1.5 SDK:
+Endpoints we have reproduced from the v0.1.7 SDK:
 
 | Method | Path                                                                                 | Purpose                                      |
 |-------:|--------------------------------------------------------------------------------------|----------------------------------------------|
@@ -177,9 +177,9 @@ Endpoints we have reproduced from the v0.1.5 SDK:
 | GET    | `/v1/workspaces/{wsId}/available-library-projects`                                   | Library entries usable as bases.             |
 | GET    | `/v1/workspaces/{wsId}/available-template-projects`                                  | Template projects.                           |
 | GET    | `/v1/workspaces/{wsId}/connections`                                                  | Outbound integrations attached to the workspace. |
-| GET    | `/v1/workspaces/{wsId}/mcp-servers`                                                  | MCP servers configured in the workspace.     |
-| GET/POST/DELETE | `/v1/workspaces/{wsId}/mcp-servers/{serverId}`                              | CRUD on individual MCP servers.              |
-| GET    | `/v1/workspaces/{wsId}/mcp-catalog`                                                  | Public MCP catalog visible from the workspace. |
+| GET/POST | `/v1/workspaces/{wsId}/connectors`                                                  | Workspace connectors, including custom MCP servers. |
+| DELETE | `/v1/workspaces/{wsId}/connectors/{connectorId}`                                     | Remove an installed connector.               |
+| GET    | `/v1/workspaces/{wsId}/available-connectors`                                         | Public connector catalog visible from the workspace. |
 | GET    | `/v1/workspaces/{wsId}/connectors/{kind}`                                            | `kind ∈ {mcp, seamless, standard}`.          |
 | GET/PUT| `/v1/workspaces/{wsId}/knowledge`                                                    | Workspace-wide knowledge content.            |
 | PUT    | `/v1/workspaces/{wsId}/folders/{folderId}/visibility`                                | Folder visibility toggle.                    |
