@@ -3134,7 +3134,7 @@ program
   .option("--no-knowledge", "Skip project and workspace knowledge")
   .option("--no-edits", "Skip edit history")
   .option("--no-database", "Skip the database status probe")
-  .option("--mcp", "Include workspace MCP servers/connectors/catalog", false)
+  .option("--mcp", "Include workspace connectors, MCP connector status, and connector catalog", false)
   .option("--output <path>", "Write the full snapshot JSON to this path")
   .option("--json", "Print the full snapshot JSON", false)
   .action(async (targetUrl, options) => {

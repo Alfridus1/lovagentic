@@ -5,7 +5,7 @@
 > This one walks every public endpoint with method, path, headers, request
 > body, response body, real example, and operational notes.
 >
-> Source of truth: `@lovable.dev/sdk` v0.1.5 (`dist/index.d.ts` + the
+> Source of truth: `@lovable.dev/sdk` v0.1.7 (`dist/index.d.ts` + the
 > compiled JS), supplemented by live network captures against
 > `https://api.lovable.dev` and `https://lovable.dev` between 2026-04-30 and
 > the date of this commit. JSON response examples are real responses,
@@ -80,10 +80,10 @@ with the matching HTTP status. The SDK wraps them in `ApiError(status, message, 
   - [POST /projects/{sourceProjectId}/remix/init](#post-projectssourceprojectidremixinit)
   - [GET /projects/{sourceProjectId}/remix/progress](#get-projectssourceprojectidremixprogress)
 - [MCP & connectors](#mcp--connectors)
-  - [GET /v1/workspaces/{wsId}/mcp-servers](#get-v1workspaceswsidmcp-servers)
-  - [POST /v1/workspaces/{wsId}/mcp-servers](#post-v1workspaceswsidmcp-servers)
-  - [DELETE /v1/workspaces/{wsId}/mcp-servers/{serverId}](#delete-v1workspaceswsidmcp-serversserverid)
-  - [GET /v1/workspaces/{wsId}/mcp-catalog](#get-v1workspaceswsidmcp-catalog)
+  - [GET /v1/workspaces/{wsId}/connectors](#get-v1workspaceswsidconnectors)
+  - [POST /v1/workspaces/{wsId}/connectors](#post-v1workspaceswsidconnectors)
+  - [DELETE /v1/workspaces/{wsId}/connectors/{connectorId}](#delete-v1workspaceswsidconnectorsconnectorid)
+  - [GET /v1/workspaces/{wsId}/available-connectors](#get-v1workspaceswsidavailable-connectors)
   - [GET /v1/workspaces/{wsId}/connectors/standard](#get-v1workspaceswsidconnectorsstandard)
   - [GET /v1/workspaces/{wsId}/connectors/seamless](#get-v1workspaceswsidconnectorsseamless)
   - [GET /v1/workspaces/{wsId}/connectors/mcp](#get-v1workspaceswsidconnectorsmcp)
@@ -943,7 +943,6 @@ new project under the *target* workspace.
   "remix_mode": "before",                // "before" | "including"
   "include_history": true,
   "include_custom_knowledge": true,
-  "include_agent_state": true,           // requires the two above + API-key auth
   "skip_initial_remix_message": false,
   "skip_integrations": false,
   "initial_message": "Add dark mode"     // optional first chat turn
@@ -974,73 +973,74 @@ The SDK wraps this loop in `client.waitForRemix(sourceProjectId, jobId)`.
 
 ## MCP & connectors
 
-Lovable supports four flavours of integration:
+Lovable exposes installed workspace connectors plus catalogs:
 
-1. **Standard connectors** — first-party integrations (Stripe, HubSpot,
-   etc.). Set up in the workspace once, used in any project.
-2. **Seamless connectors** — auto-installed integrations driven by AI
-   intent (think "you mentioned email, so I configured Resend for you").
-3. **MCP connectors** — workspace-installed MCP servers presented to the
-   project's chat agent.
-4. **External MCP servers** — bring-your-own MCP, registered per workspace.
+1. **Installed connectors** - workspace-level integrations, including
+   bring-your-own MCP servers.
+2. **Available connectors** - connector templates that Lovable can install.
+3. **Standard connectors** - first-party OAuth-style integrations.
+4. **Seamless connectors** - integrations Lovable can configure from intent.
+5. **MCP connectors** - MCP-capable catalog entries and custom MCP state.
 
-Plus **connections**: authenticated accounts attached to a connector
-(e.g. one Slack workspace).
+Plus **connections**: authenticated accounts attached to a connector, for
+example one Slack workspace.
 
-### `GET /v1/workspaces/{wsId}/mcp-servers`
+SDK 0.1.7 replaced the older `mcp-servers` and `mcp-catalog` methods with
+general `connectors` and `available-connectors` methods. `lovagentic` keeps
+legacy CLI aliases for compatibility, but the backend calls the new SDK names.
+
+### `GET /v1/workspaces/{wsId}/connectors`
 
 ```jsonc
 {
-  "servers": [
+  "connectors": [
     {
-      "id": "mcp_…",
+      "id": "conn_…",
       "name": "Internal Notion",
-      "url":  "https://notion-mcp.example.com",
-      "auth_kind": "header" | "oauth" | "none",
-      "headers":  { "Authorization": "Bearer …" },
-      "created_at": "…"
+      "url": "https://notion-mcp.example.com",
+      "auth_type": "none" | "bearer_token",
+      "connector_id": "custom-mcp",
+      "is_connected": true
     }
   ]
 }
 ```
 
-### `POST /v1/workspaces/{wsId}/mcp-servers`
+### `POST /v1/workspaces/{wsId}/connectors`
 
 ```jsonc
 {
   "name": "Internal Notion",
-  "url":  "https://notion-mcp.example.com",
-  "auth_kind": "header",
-  "headers":  { "Authorization": "Bearer …" },
-  "description": "Read-only Notion bridge"
+  "url": "https://notion-mcp.example.com",
+  "auth_type": "none" | "bearer_token",
+  "connector_id": "custom-mcp",  // optional catalog/template id
+  "token": "..."                 // only with auth_type == "bearer_token"
 }
 ```
 
-Returns the created `MCPServerResponse`.
+Returns the created `ConnectorResponse`. The server URL is tested before the
+connector is saved.
 
-### `DELETE /v1/workspaces/{wsId}/mcp-servers/{serverId}`
+### `DELETE /v1/workspaces/{wsId}/connectors/{connectorId}`
 
-Returns `{ "ok": true }`.
+Returns `{ "success": true }`.
 
-### `GET /v1/workspaces/{wsId}/mcp-catalog`
+### `GET /v1/workspaces/{wsId}/available-connectors`
 
 ```jsonc
 {
-  "entries": [
+  "catalog": [
     {
-      "id": "catalog_…",
-      "name": "Linear",
-      "logo_url": "https://…",
-      "description": "Issue tracking",
-      "homepage": "https://linear.app",
-      "default_install": { "url": "https://mcp.linear.app", "auth_kind": "oauth" }
+      "id": "linear",
+      "display_name": "Linear",
+      "summary": "Issue tracking",
+      "category": "Productivity",
+      "requires_custom_url": false,
+      "documentation_url": "https://..."
     }
   ]
 }
 ```
-
-This is Lovable's **curated** MCP catalog (installable in one click). Don't
-confuse with `mcp-servers` (your own).
 
 ### `GET /v1/workspaces/{wsId}/connectors/standard`
 
@@ -1049,11 +1049,12 @@ confuse with `mcp-servers` (your own).
   "connectors": [
     {
       "id": "stripe",
-      "name": "Stripe",
-      "description": "Payments",
-      "logo_url": "https://…",
-      "auth_kind": "oauth" | "apikey",
-      "is_installed": true
+      "display_name": "Stripe",
+      "short_description": "Payments",
+      "categories": ["payments"],
+      "auth_type": "oauth",
+      "is_enabled_for_workspace": true,
+      "documentation_url": "https://..."
     }
   ]
 }
@@ -1061,7 +1062,7 @@ confuse with `mcp-servers` (your own).
 
 ### `GET /v1/workspaces/{wsId}/connectors/seamless`
 
-Same shape as standard. The SDK distinguishes `is_seamless: true`.
+Same shape as standard, without the `auth_type` field.
 
 ### `GET /v1/workspaces/{wsId}/connectors/mcp`
 
@@ -1070,10 +1071,12 @@ Same shape as standard. The SDK distinguishes `is_seamless: true`.
   "connectors": [
     {
       "id": "linear",
-      "name": "Linear",
-      "kind": "catalog" | "custom",
-      "is_installed": true,
-      "server": { /* MCPServerResponse if installed */ }
+      "display_name": "Linear",
+      "summary": "Issue tracking",
+      "status": "available",
+      "is_enabled_for_workspace": true,
+      "is_connected": true,
+      "connector_id": "conn_..."
     }
   ],
   "custom_enabled": true
@@ -1216,7 +1219,16 @@ type ProjectStatus = "completed" | "in_progress" | "failed";
 type ContinuationOverride = "force" | "fresh_build" | "allow_expired_cache";
 type RemixMode = "before" | "including";
 type RemixJobStatus = "unknown" | "preparing" | "running" | "completed" | "error";
-type RemixJobStep = "starting" | "creating_new_project" | "remixing_integration" | "finalizing" | "completed";
+type RemixJobStep =
+  | "starting"
+  | "creating_new_project"
+  | "restoring_supabase"
+  | "copying_history"
+  | "preparing_repository"
+  | "remixing_integration"
+  | "pushing_repository"
+  | "finalizing"
+  | "completed";
 type TracePurpose = "main_agent" | "codebase_rag" | "knowledge_rag" | "review";
 
 interface MeWorkspace { id: string; name: string; role: string; }
@@ -1382,15 +1394,31 @@ interface DatabaseConnectionInfo {
 interface ProjectAnalyticsResponse { /* see Analytics section above */ }
 interface ProjectAnalyticsTrendResponse { current_visitors: number; trend_30min: { ts: string; value: number }[]; }
 
-interface MCPServerResponse {
-  id: string; name: string; url: string;
-  auth_kind: "header" | "oauth" | "none";
-  headers?: Record<string, string>;
-  description?: string;
-  created_at: string;
+interface ConnectorResponse {
+  id: string;
+  name: string;
+  url?: string;
+  auth_type: string;
+  connector_id?: string;
+  is_connected: boolean;
 }
 
-interface MCPCatalogEntry { id: string; name: string; description?: string; logo_url?: string; homepage?: string; default_install?: { url: string; auth_kind: string }; }
+interface AvailableConnectorEntry {
+  id: string;
+  display_name: string;
+  summary: string;
+  category: string;
+  requires_custom_url?: boolean;
+  documentation_url?: string;
+}
+
+interface AddConnectorBody {
+  name: string;
+  url: string;
+  auth_type: "none" | "bearer_token";
+  connector_id?: string;
+  token?: string;
+}
 
 interface RemixProjectOptions {
   workspaceId: string;
@@ -1398,7 +1426,6 @@ interface RemixProjectOptions {
   remixMode?: RemixMode;
   includeHistory?: boolean;
   includeCustomKnowledge?: boolean;
-  includeAgentState?: boolean;
   initialMessage?: string;
   skipInitialRemixMessage?: boolean;
   skipIntegrations?: boolean;
@@ -1515,7 +1542,6 @@ const jobId = await client.remixProject(sourceProjectId, {
   remixMode: "before",
   includeHistory: true,
   includeCustomKnowledge: true,
-  includeAgentState: true,
 });
 const { projectId } = await client.waitForRemix(sourceProjectId, jobId, {
   pollInterval: 2000,
@@ -1544,17 +1570,15 @@ console.log("New project:", projectId);
 - **Knowledge "diffs".** There is no diff endpoint for knowledge changes —
   Lovable just stores the latest revision. Snapshot before mutating if you
   need rollback.
-- **MCP server URLs are checked at install time only.** A subsequent
-  network failure does not deactivate the server; it just produces tool
+- **Custom connector URLs are checked at install time only.** A subsequent
+  network failure does not deactivate the connector; it just produces tool
   errors in the agent's traces.
-- **`include_agent_state: true` requires API-key auth** for remix. Bearer
-  tokens are accepted for the rest of the remix flow.
 - **`/v1/_dev/...` endpoints require an API key.** A Firebase Bearer token
   is rejected with `403 dev_api_key_required`.
 
 ---
 
-_Last verified against production: 2026-04-30 (full live recon, see corrections below)._
+_Last verified against SDK 0.1.7: 2026-05-05._
 
 ---
 

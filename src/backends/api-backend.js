@@ -372,27 +372,47 @@ export async function createApiBackend(options = {}) {
     },
 
     async remixProject(sourceProjectId, options) {
-      return await client.remixProject(sourceProjectId, options);
+      return await client.remixProject(sourceProjectId, normalizeRemixOptions(options));
     },
 
     async waitForRemix(sourceProjectId, jobId, options) {
       return await client.waitForRemix(sourceProjectId, jobId, options);
     },
 
+    async listConnectors(workspaceId) {
+      const response = await callSdkMethod(client, ["listConnectors", "listMCPServers"], [workspaceId]);
+      return normalizeConnectorListResponse(response);
+    },
+
+    async addConnector(workspaceId, body) {
+      return await callSdkMethod(client, ["addConnector", "addMCPServer"], [workspaceId, body]);
+    },
+
+    async removeConnector(workspaceId, connectorId) {
+      return await callSdkMethod(client, ["removeConnector", "removeMCPServer"], [workspaceId, connectorId]);
+    },
+
+    async listAvailableConnectors(workspaceId) {
+      const response = await callSdkMethod(client, ["listAvailableConnectors", "listMCPCatalog"], [workspaceId]);
+      return normalizeConnectorCatalogResponse(response);
+    },
+
     async listMCPServers(workspaceId) {
-      return await client.listMCPServers(workspaceId);
+      const response = await callSdkMethod(client, ["listConnectors", "listMCPServers"], [workspaceId]);
+      return normalizeMcpServerListResponse(response);
     },
 
     async addMCPServer(workspaceId, body) {
-      return await client.addMCPServer(workspaceId, body);
+      return await callSdkMethod(client, ["addConnector", "addMCPServer"], [workspaceId, body]);
     },
 
     async removeMCPServer(workspaceId, serverId) {
-      return await client.removeMCPServer(workspaceId, serverId);
+      return await callSdkMethod(client, ["removeConnector", "removeMCPServer"], [workspaceId, serverId]);
     },
 
     async listMCPCatalog(workspaceId) {
-      return await client.listMCPCatalog(workspaceId);
+      const response = await callSdkMethod(client, ["listAvailableConnectors", "listMCPCatalog"], [workspaceId]);
+      return normalizeConnectorCatalogResponse(response);
     },
 
     async listStandardConnectors(workspaceId) {
@@ -452,6 +472,52 @@ async function normalizeProjectOptions(options = {}) {
     ...options,
     files: await normalizeFiles(options.files ?? options.filePaths)
   };
+}
+
+export function normalizeRemixOptions(options = {}) {
+  const out = { ...options };
+  delete out.includeAgentState;
+  delete out.include_agent_state;
+  return out;
+}
+
+export function normalizeConnectorListResponse(response) {
+  const base = isPlainObject(response) ? { ...response } : {};
+  const connectors = firstArray(response?.connectors, response?.servers, response);
+  return { ...base, connectors };
+}
+
+export function normalizeMcpServerListResponse(response) {
+  const normalized = normalizeConnectorListResponse(response);
+  const servers = firstArray(response?.servers, normalized.connectors);
+  return { ...normalized, servers };
+}
+
+export function normalizeConnectorCatalogResponse(response) {
+  const base = isPlainObject(response) ? { ...response } : {};
+  const catalog = firstArray(response?.catalog, response?.connectors, response);
+  return { ...base, catalog };
+}
+
+async function callSdkMethod(client, methodNames, args = []) {
+  for (const methodName of methodNames) {
+    const method = client?.[methodName];
+    if (typeof method === "function") {
+      return await method.call(client, ...args);
+    }
+  }
+  throw new Error(`@lovable.dev/sdk does not expose any of: ${methodNames.join(", ")}`);
+}
+
+function firstArray(...values) {
+  for (const value of values) {
+    if (Array.isArray(value)) return value;
+  }
+  return [];
+}
+
+function isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 async function normalizeFiles(files) {

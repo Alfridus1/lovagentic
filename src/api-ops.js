@@ -168,18 +168,20 @@ export async function buildApiSnapshot(apiBackend, targetUrl, options = {}) {
   }
 
   if (options.mcp && workspaceId) {
+    const installedConnectors = await maybeCall(() => apiBackend.listConnectors(workspaceId), {
+      warnings: snapshot.warnings,
+      label: "connectors"
+    });
     snapshot.mcp = {
-      servers: await maybeCall(() => apiBackend.listMCPServers(workspaceId), {
-        warnings: snapshot.warnings,
-        label: "MCP servers"
-      }),
+      servers: installedConnectors,
+      installedConnectors,
       connectors: await maybeCall(() => apiBackend.listMCPConnectors(workspaceId), {
         warnings: snapshot.warnings,
         label: "MCP connectors"
       }),
-      catalog: await maybeCall(() => apiBackend.listMCPCatalog(workspaceId), {
+      catalog: await maybeCall(() => apiBackend.listAvailableConnectors(workspaceId), {
         warnings: snapshot.warnings,
-        label: "MCP catalog"
+        label: "connector catalog"
       })
     };
   }

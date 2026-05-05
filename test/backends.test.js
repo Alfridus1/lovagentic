@@ -9,6 +9,10 @@ import {
   enrichProjectWithAggregates,
   mergeProjectAggregates,
   clearApiBackendCaches,
+  normalizeConnectorCatalogResponse,
+  normalizeConnectorListResponse,
+  normalizeMcpServerListResponse,
+  normalizeRemixOptions,
 } from "../src/backends/api-backend.js";
 import { CAPABILITIES } from "../src/backends/capabilities.js";
 import { getBackend } from "../src/backends/index.js";
@@ -29,6 +33,7 @@ test("api backend advertises official SDK-backed capabilities", () => {
   assert.equal(capabilities.has(CAPABILITIES.PROMPT_SUBMIT), true);
   assert.equal(capabilities.has(CAPABILITIES.PUBLISH_RUN), true);
   assert.equal(capabilities.has(CAPABILITIES.MCP_SERVERS), true);
+  assert.equal(capabilities.has(CAPABILITIES.MCP_CONNECTORS), true);
   assert.equal(capabilities.has(CAPABILITIES.VERIFY_DESKTOP), false);
 });
 
@@ -62,6 +67,57 @@ function restoreEnv(name, value) {
     process.env[name] = value;
   }
 }
+
+test("api backend normalizes 0.1.7 connector lists and legacy MCP server aliases", () => {
+  const response = {
+    connectors: [
+      { id: "conn_1", name: "Docs", auth_type: "none", is_connected: true },
+    ],
+  };
+
+  assert.deepEqual(normalizeConnectorListResponse(response), response);
+  assert.deepEqual(normalizeMcpServerListResponse(response), {
+    ...response,
+    servers: response.connectors,
+  });
+});
+
+test("api backend normalizes old MCP server responses into connector shape", () => {
+  const response = {
+    servers: [
+      { id: "mcp_1", name: "Legacy MCP", url: "https://mcp.example.com" },
+    ],
+  };
+
+  assert.deepEqual(normalizeConnectorListResponse(response), {
+    servers: response.servers,
+    connectors: response.servers,
+  });
+});
+
+test("api backend normalizes available connector catalogs", () => {
+  const response = {
+    catalog: [
+      { id: "linear", display_name: "Linear", summary: "Issues", category: "Project management" },
+    ],
+  };
+
+  assert.deepEqual(normalizeConnectorCatalogResponse(response), response);
+});
+
+test("api backend strips removed remix includeAgentState option", () => {
+  const normalized = normalizeRemixOptions({
+    workspaceId: "ws_1",
+    includeHistory: true,
+    includeAgentState: true,
+    include_agent_state: true,
+  });
+
+  assert.deepEqual(normalized, {
+    workspaceId: "ws_1",
+    includeHistory: true,
+  });
+});
 
 // ---- enrichment workaround for the slim getProject response ----
 
